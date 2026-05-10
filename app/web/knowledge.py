@@ -16,6 +16,7 @@ def render_knowledge(
     similar_documents: Optional[list[dict]] = None,
     preview_html: str = "",
     preview_mode: str = "rendered",
+    selected_chunk: Optional[int] = None,
     message: str = "",
 ) -> str:
     stats = get_dashboard_stats(settings.resolved_database_path)
@@ -38,6 +39,7 @@ def render_knowledge(
             similar_documents or [],
             preview_html,
             preview_mode,
+            selected_chunk,
         ),
     }
     for key, value in replacements.items():
@@ -56,7 +58,7 @@ def render_document_rows(documents: list) -> str:
         rows.append(
             "<tr>"
             f'<td><input type="checkbox" name="selected_document_id" value="{document["id"]}"></td>'
-            f'<td><strong><a class="table-link" href="/knowledge?document_id={document["id"]}">{escape(document["title"] or "Untitled")}</a></strong><small>{escape(document["source_path"])}</small></td>'
+            f'<td><strong><a class="table-link" data-detail-link="1" href="/knowledge?document_id={document["id"]}#document-detail-panel">{escape(document["title"] or "Untitled")}</a></strong><small>{escape(document["source_path"])}</small></td>'
             f'<td>{escape(document["category"] or "uncategorized")}</td>'
             f'<td>{tags}</td>'
             f'<td>{escape(summary)}</td>'
@@ -134,15 +136,16 @@ def render_document_detail_panel(
     similar_documents: list[dict],
     preview_html: str,
     preview_mode: str,
+    selected_chunk: Optional[int],
 ) -> str:
     if document is None:
         return ""
     tag_value = ", ".join(document.tags)
-    chunk_items = render_chunk_items(chunks)
+    chunk_items = render_chunk_items(chunks, selected_chunk=selected_chunk)
     similar_items = render_similar_documents(similar_documents)
     preview_toolbar = render_preview_toolbar(document, preview_mode)
     return f"""
-<section class="panel">
+<section class="panel" id="document-detail-panel">
   <div class="panel-heading">
     <div>
       <h2>文档详情</h2>
@@ -200,7 +203,7 @@ def render_document_detail_panel(
   <div class="preview-panel">{preview_html or '<p class="muted">暂时无法预览该文档内容。</p>'}</div>
   <div class="panel-heading">
     <h2>Chunk 明细</h2>
-    <p>展示当前文档已入库的文本分块。</p>
+    <p>展示当前文档已入库的文本分块。你可以从搜索结果直接定位到对应片段。</p>
   </div>
   <div class="chunk-list">{chunk_items}</div>
   <div class="panel-heading">
@@ -212,14 +215,17 @@ def render_document_detail_panel(
 """.strip()
 
 
-def render_chunk_items(chunks: list[ChunkRecord]) -> str:
+def render_chunk_items(chunks: list[ChunkRecord], selected_chunk: Optional[int] = None) -> str:
     if not chunks:
         return '<p class="muted">当前文档暂无 chunk。</p>'
     items = []
     for chunk in chunks:
+        active_class = " chunk-card-active" if selected_chunk == chunk.chunk_index else ""
+        active_note = '<p class="notice">这是当前搜索结果命中的片段。</p>' if selected_chunk == chunk.chunk_index else ""
         items.append(
-            '<article class="chunk-card">'
+            f'<article class="chunk-card{active_class}" id="chunk-{chunk.chunk_index}">'
             f'<h3>Chunk #{chunk.chunk_index}</h3>'
+            f'{active_note}'
             f'<pre>{escape(chunk.content)}</pre>'
             '</article>'
         )
@@ -234,7 +240,7 @@ def render_similar_documents(documents: list[dict]) -> str:
         score = document.get("similarity_score", 0)
         items.append(
             '<article class="similar-card">'
-            f'<h3><a class="table-link" href="/knowledge?document_id={document["id"]}">{escape(document.get("title") or "Untitled")}</a></h3>'
+            f'<h3><a class="table-link" data-detail-link="1" href="/knowledge?document_id={document["id"]}#document-detail-panel">{escape(document.get("title") or "Untitled")}</a></h3>'
             f'<p>{escape(build_snippet(document.get("summary") or "", max_length=120))}</p>'
             f'<small>{escape(document.get("category") or "uncategorized")} · score {score}</small>'
             '</article>'
@@ -276,8 +282,8 @@ def render_preview_toolbar(document: DocumentRecord, preview_mode: str) -> str:
     normalized_mode = normalize_preview_mode(preview_mode)
     rendered_class = " preview-tab-active" if normalized_mode == "rendered" else ""
     raw_class = " preview-tab-active" if normalized_mode == "raw" else ""
-    raw_link = f"/knowledge?document_id={document.id}&preview=raw"
-    rendered_link = f"/knowledge?document_id={document.id}&preview=rendered"
+    raw_link = f"/knowledge?document_id={document.id}&preview=raw#document-detail-panel"
+    rendered_link = f"/knowledge?document_id={document.id}&preview=rendered#document-detail-panel"
     source_info = render_source_info(source_path)
     return (
         '<div class="preview-toolbar">'

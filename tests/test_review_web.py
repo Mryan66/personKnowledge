@@ -5,9 +5,11 @@ from tempfile import TemporaryDirectory
 from app.agents.review_agent import ReviewReport
 from app.config import Settings
 from app.web.review import (
+    extract_review_insights,
     format_size,
     read_review_file,
     render_history_list,
+    render_review_action_panel,
     render_report_panel,
     render_review,
     render_selected_review_panel,
@@ -38,19 +40,37 @@ class ReviewWebTests(unittest.TestCase):
         self.assertIn("暂无历史 Review", html)
 
     def test_render_report_panel_shows_report_body(self):
-        report = ReviewReport("Daily Review", "# Daily Review\n\n内容", None)
+        report = ReviewReport("Daily Review", "# Daily Review\n\n## 总览\n- 高频标签：rag, agent\n- 主要分类：notes\n\n## 文档摘要\n- **第一篇**", None)
 
         html = render_report_panel(report, message="done")
 
         self.assertIn("Daily Review", html)
         self.assertIn("done", html)
         self.assertIn("markdown-preview", html)
+        self.assertIn("复盘已生成", html)
+        self.assertIn("基于这份复盘", html)
+        self.assertIn("搜索标签：rag", html)
 
     def test_render_selected_review_panel(self):
-        html = render_selected_review_panel("today.md", "# Today")
+        html = render_selected_review_panel("today.md", "# Today\n\n## 总览\n- 高频标签：rag")
 
         self.assertIn("today.md", html)
         self.assertIn("# Today", html)
+        self.assertIn("搜索标签：rag", html)
+
+    def test_extract_review_insights(self):
+        insights = extract_review_insights(
+            "# Review\n\n## 总览\n- 高频标签：rag, agent\n- 主要分类：notes, project\n\n## 文档摘要\n- **第一篇**\n- **第二篇**"
+        )
+
+        self.assertEqual(insights["top_tags"], ["rag", "agent"])
+        self.assertEqual(insights["top_categories"], ["notes", "project"])
+        self.assertEqual(insights["document_titles"], ["第一篇", "第二篇"])
+
+    def test_render_review_action_panel_empty_for_no_insights(self):
+        html = render_review_action_panel("# Review\n\n内容")
+
+        self.assertEqual(html, "")
 
     def test_render_review_page_includes_history_and_form(self):
         with TemporaryDirectory() as temporary_directory:

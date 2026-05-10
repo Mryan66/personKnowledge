@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from app.config import Settings
 from app.ingest.pipeline import ingest_file
 from app.tools.search_tool import SearchTool
-from app.web.search import build_snippet, render_results_panel, render_search
+from app.web.search import build_follow_up_prompt, build_snippet, render_results_panel, render_search
 
 
 class SearchWebTests(unittest.TestCase):
@@ -35,6 +35,22 @@ class SearchWebTests(unittest.TestCase):
         self.assertIn("done", html)
         self.assertIn("#chunk-0", html)
         self.assertIn("分类", html)
+        self.assertIn("围绕这条继续问", html)
+        self.assertIn("查看原文片段", html)
+
+    def test_build_follow_up_prompt_contains_title_and_excerpt(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            note = root / "rag.md"
+            note.write_text("# RAG 搜索\n\n关键词和向量检索。", encoding="utf-8")
+            ingest_file(note, database_path)
+            result = SearchTool(database_path).search("RAG")[0]
+
+        prompt = build_follow_up_prompt(result)
+
+        self.assertIn("RAG 搜索", prompt)
+        self.assertIn("参考内容", prompt)
 
     def test_render_search_page_includes_form_options(self):
         with TemporaryDirectory() as temporary_directory:
@@ -66,7 +82,7 @@ class SearchWebTests(unittest.TestCase):
         self.assertIn("Personal AI Knowledge Butler", html)
         self.assertIn("Agent", html)
         self.assertIn("selected", html)
-        self.assertIn("Vector", html)
+        self.assertIn("语义搜索", html)
         self.assertIn("未配置", html)
         self.assertIn("agent", html)
         self.assertIn("张三", html)

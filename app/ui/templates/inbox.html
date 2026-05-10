@@ -10,13 +10,13 @@
   <aside class="sidebar">
     <div class="brand">AI 知识管家</div>
     <nav>
-      <a href="/dashboard">Dashboard</a>
-      <a class="active" href="/inbox">Inbox 导入</a>
-      <a href="/knowledge">Knowledge 知识库</a>
-      <a href="/search">Search 搜索</a>
-      <a href="/ask">Ask AI</a>
-      <a href="/review">Review 复盘</a>
-      <a href="/settings">Settings 设置</a>
+      <a href="/dashboard">首页</a>
+      <a class="active" href="/inbox">导入资料</a>
+      <a href="/knowledge">知识库</a>
+      <a href="/search">搜索</a>
+      <a href="/ask">AI 问答</a>
+      <a href="/review">知识复盘</a>
+      <a href="/settings">设置</a>
     </nav>
   </aside>
 
@@ -25,7 +25,7 @@
       <div>
         <p class="eyebrow">Inbox</p>
         <h1>导入中心</h1>
-        <p>扫描 `inbox/` 中的 Markdown、TXT、PDF、DOCX、HTML 与图片文件，并导入到知识库。</p>
+        <p>把笔记、PDF 或网页资料放进 Inbox 文件夹，然后一键导入到知识库。</p>
       </div>
       <div class="status-panel">
         <div><span>Inbox 路径</span><strong>{{ inbox_path }}</strong></div>
@@ -36,31 +36,40 @@
 
     {{ result_panel }}
 
+    {{ getting_started_panel }}
+
     <section class="panel">
       <div class="panel-heading">
-        <h2>导入操作</h2>
-        <p>可导入整个 Inbox，也可以填写任意文件/目录路径。</p>
+        <h2>第二步：开始导入</h2>
+        <p>默认导入整个 Inbox；只有你很确定时，才需要改下面的路径或高级选项。</p>
       </div>
-      <form class="inline-form" method="post" action="/inbox/ingest">
+      <form class="inline-form progress-form" method="post" action="/inbox/ingest" data-progress-text="正在扫描文件并导入知识库...">
         <label>
           路径
           <input type="text" name="path" value="{{ inbox_path }}" placeholder="文件或目录路径">
         </label>
-        <label class="checkbox-label">
-          <input type="checkbox" name="generate_embeddings" value="1" checked>
-          生成 Embedding
-        </label>
-        <button type="submit">导入路径</button>
+        <details class="advanced-settings">
+          <summary>高级设置</summary>
+          <label class="checkbox-label">
+            <input type="checkbox" name="generate_embeddings" value="1" checked>
+            建立语义索引（推荐）
+          </label>
+        </details>
+        <button type="submit" data-loading-label="正在导入...">导入这个路径</button>
       </form>
     </section>
 
     <section class="panel">
       <div class="panel-heading">
-        <h2>待导入文件</h2>
-        <p>扫描结果来自当前 Inbox 目录。</p>
+        <h2>第三步：查看并导入文件</h2>
+        <p>扫描结果来自当前 Inbox 目录。你可以单独导入某个文件，也可以一次导入全部。</p>
       </div>
-      <form method="post" action="/inbox/ingest">
+      <form method="post" action="/inbox/ingest" class="progress-form" data-progress-text="正在批量导入 Inbox 文件...">
         <input type="hidden" name="generate_embeddings" value="1">
+        <div class="toolbar">
+          <button type="submit" name="path" value="{{ inbox_path }}" data-loading-label="正在导入全部...">导入全部文件</button>
+          <button type="button" class="secondary-button" data-copy-path="{{ inbox_path }}">复制 Inbox 路径</button>
+        </div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
@@ -80,5 +89,40 @@
       </form>
     </section>
   </main>
+<script>
+(function() {
+  const forms = document.querySelectorAll('.progress-form');
+  const resultPanel = document.querySelector('[data-result-panel]');
+  const copyButton = document.querySelector('[data-copy-path]');
+  const liveRegion = document.querySelector('[data-live-region]');
+
+  forms.forEach(function(form) {
+    form.addEventListener('submit', function() {
+      const button = form.querySelector('button[type="submit"]');
+      const progressText = form.getAttribute('data-progress-text') || '正在处理中...';
+      if (button) {
+        button.disabled = true;
+        button.dataset.originalLabel = button.textContent;
+        button.textContent = button.getAttribute('data-loading-label') || '正在处理中...';
+      }
+      if (liveRegion) {
+        liveRegion.textContent = progressText;
+      }
+      if (resultPanel) {
+        resultPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+
+  if (copyButton && navigator.clipboard) {
+    copyButton.addEventListener('click', function() {
+      navigator.clipboard.writeText(copyButton.getAttribute('data-copy-path') || '');
+      if (liveRegion) {
+        liveRegion.textContent = 'Inbox 路径已复制，你可以直接在系统里打开这个目录。';
+      }
+    });
+  }
+})();
+</script>
 </body>
 </html>

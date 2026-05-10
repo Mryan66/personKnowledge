@@ -117,6 +117,15 @@ class SettingsWebTests(unittest.TestCase):
         self.assertIn("KB_DATABASE_PATH", html)
         self.assertIn("保存配置", html)
 
+    def test_settings_template_uses_unified_sidebar_labels(self):
+        template_path = Path("/Library/temp/personKnowledge/app/ui/templates/settings.html")
+        html = template_path.read_text(encoding="utf-8")
+
+        self.assertIn(">首页<", html)
+        self.assertIn(">导入资料<", html)
+        self.assertIn(">AI 问答<", html)
+        self.assertIn(">设置<", html)
+
 
 if __name__ == "__main__":
     unittest.main()

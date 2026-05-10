@@ -10,13 +10,13 @@
   <aside class="sidebar">
     <div class="brand">AI 知识管家</div>
     <nav>
-      <a href="/dashboard">Dashboard</a>
-      <a href="/inbox">Inbox 导入</a>
-      <a href="/knowledge">Knowledge 知识库</a>
-      <a class="active" href="/search">Search 搜索</a>
-      <a href="/ask">Ask AI</a>
-      <a href="/review">Review 复盘</a>
-      <a href="/settings">Settings 设置</a>
+      <a href="/dashboard">首页</a>
+      <a href="/inbox">导入资料</a>
+      <a href="/knowledge">知识库</a>
+      <a class="active" href="/search">搜索</a>
+      <a href="/ask">AI 问答</a>
+      <a href="/review">知识复盘</a>
+      <a href="/settings">设置</a>
     </nav>
   </aside>
 
@@ -25,7 +25,7 @@
       <div>
         <p class="eyebrow">Search</p>
         <h1>搜索知识库</h1>
-        <p>支持混合检索（关键词 + 向量）+ Rerank。</p>
+        <p>先用自然语言搜一搜，再决定是否继续追问 AI。</p>
       </div>
       <div class="status-panel">
         <div><span>OpenAI</span><strong class="{{ openai_status_class }}">{{ openai_status }}</strong></div>
@@ -37,47 +37,72 @@
     <section class="panel">
       <div class="panel-heading">
         <h2>搜索条件</h2>
-        <p>Auto 模式使用混合搜索（关键词 + 向量）+ Rerank。</p>
+        <p>默认使用智能搜索。大多数情况下，你只需要输入问题本身。</p>
       </div>
-      <form class="search-form" method="post" action="/search">
+      <form class="search-form progress-form" method="post" action="/search" data-progress-text="正在搜索你的知识库...">
         <label class="query-field">
           查询内容
           <input type="search" name="query" value="{{ query }}" placeholder="例如：RAG 优化方法、语义搜索、Agent 记忆">
         </label>
-        <label>
-          检索模式
-          <select name="mode">{{ mode_options }}</select>
-        </label>
-        <label>
-          数量
-          <input type="number" name="limit" value="{{ limit }}" min="1" max="20">
-        </label>
-        <label>
-          分类
-          <input type="text" name="category" value="{{ category_filter }}" placeholder="如 agent / project">
-        </label>
-        <label>
-          标签
-          <input type="text" name="tag" value="{{ tag_filter }}" placeholder="如 rag / memory">
-        </label>
-        <label>
-          人物
-          <input type="text" name="person" value="{{ person_filter }}" placeholder="如 张三 / Alice">
-        </label>
-        <label>
-          开始日期
-          <input type="date" name="date_from" value="{{ date_from_filter }}">
-        </label>
-        <label>
-          结束日期
-          <input type="date" name="date_to" value="{{ date_to_filter }}">
-        </label>
-        <button type="submit">搜索</button>
+        <details class="advanced-settings">
+          <summary>高级筛选</summary>
+          <label>
+            搜索模式
+            <select name="mode">{{ mode_options }}</select>
+          </label>
+          <label>
+            结果数量
+            <input type="number" name="limit" value="{{ limit }}" min="1" max="20">
+          </label>
+          <label>
+            分类
+            <input type="text" name="category" value="{{ category_filter }}" placeholder="如 agent / project">
+          </label>
+          <label>
+            标签
+            <input type="text" name="tag" value="{{ tag_filter }}" placeholder="如 rag / memory">
+          </label>
+          <label>
+            人物
+            <input type="text" name="person" value="{{ person_filter }}" placeholder="如 张三 / Alice">
+          </label>
+          <label>
+            开始日期
+            <input type="date" name="date_from" value="{{ date_from_filter }}">
+          </label>
+          <label>
+            结束日期
+            <input type="date" name="date_to" value="{{ date_to_filter }}">
+          </label>
+        </details>
+        <button type="submit" data-loading-label="正在搜索...">开始搜索</button>
       </form>
     </section>
 
     {{ results_panel }}
     {{ search_history_panel }}
   </main>
+<script>
+(function() {
+  const form = document.querySelector('.progress-form');
+  const liveRegion = document.querySelector('[data-live-region]');
+  const resultPanel = document.querySelector('[data-result-panel]');
+  if (!form) return;
+
+  form.addEventListener('submit', function() {
+    const button = form.querySelector('button[type="submit"]');
+    if (button) {
+      button.disabled = true;
+      button.textContent = button.getAttribute('data-loading-label') || '正在处理中...';
+    }
+    if (liveRegion) {
+      liveRegion.textContent = form.getAttribute('data-progress-text') || '正在搜索你的知识库...';
+    }
+    if (resultPanel) {
+      resultPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+})();
+</script>
 </body>
 </html>

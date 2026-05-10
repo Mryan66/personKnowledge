@@ -53,6 +53,9 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         if path == "/knowledge":
             self._handle_knowledge_get()
             return
+        if path == "/knowledge/detail":
+            self._handle_knowledge_detail_get()
+            return
         if path == "/search":
             self._handle_search_get()
             return
@@ -74,6 +77,9 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/inbox/ingest":
             self._handle_ingest_post()
+            return
+        if path == "/inbox/sample":
+            self._handle_ingest_sample_post()
             return
         if path == "/search":
             self._handle_search_post()
@@ -117,15 +123,21 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         settings = get_settings()
         query = parse_qs(urlparse(self.path).query)
         session_id = query.get("session_id", [""])[0].strip()
+        question = query.get("question", [""])[0].strip()
+        context_title = query.get("context_title", [""])[0].strip()
+        context_source = query.get("context_source", [""])[0].strip()
         sessions = list_chat_sessions(settings.resolved_database_path, limit=20)
         messages = list_chat_messages(settings.resolved_database_path, int(session_id)) if session_id.isdigit() else []
         self._send_html(
             render_ask(
                 settings,
                 TEMPLATE_DIR / "ask.html",
+                question=question,
                 session_id=session_id,
                 sessions=sessions,
                 messages=messages,
+                prefill_context=build_prefill_context(context_title, context_source),
+                answer_state="idle",
             )
         )
 
@@ -136,25 +148,85 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         generate_embeddings = form.get("generate_embeddings", [""])[0] == "1"
         embedding_tool = build_embedding_tool(settings) if generate_embeddings else None
         organizer_agent = build_organizer_agent(settings)
-        batch = ingest_path(
-            target,
-            settings.resolved_database_path,
-            embedding_tool=embedding_tool,
-            organizer_agent=organizer_agent,
-            enable_ocr=settings.enable_ocr,
-        )
-        message = f"已处理路径：{target}"
+        try:
+            batch = ingest_path(
+                target,
+                settings.resolved_database_path,
+                embedding_tool=embedding_tool,
+                organizer_agent=organizer_agent,
+                enable_ocr=settings.enable_ocr,
+            )
+            message = f"已处理路径：{target}"
+        except (DocumentParseError, OSError, ValueError, OpenAIClientError) as error:
+            batch = None
+            message = f"导入失败：{error}"
         self._send_html(render_inbox(settings, TEMPLATE_DIR / "inbox.html", batch=batch, message=message))
+
+    def _handle_ingest_sample_post(self) -> None:
+        settings = get_settings()
+        ensure_directory(settings.resolved_inbox_dir)
+        sample_path = settings.resolved_inbox_dir / "sample-getting-started.md"
+        sample_path.write_text(
+            "\n".join(
+                [
+                    "# 我的第一份知识样例",
+                    "",
+                    "这是一个用于快速体验的示例文档。",
+                    "",
+                    "## 你可以马上试的事",
+                    "- 去搜索“知识样例”",
+                    "- 去问“这份资料讲了什么？”",
+                    "- 去生成一次知识复盘",
+                    "",
+                    "## 主题",
+                    "个人知识管理、AI 问答、复盘",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self._send_html(render_inbox(settings, TEMPLATE_DIR / "inbox.html", message=f"示例文件已准备好：{sample_path.name}"))
 
     def _handle_knowledge_get(self) -> None:
         settings = get_settings()
         query = parse_qs(urlparse(self.path).query)
+        selected_document, chunks, similar_documents, preview_html, preview_mode, selected_chunk = self._build_knowledge_detail_context(settings, query)
+        message = query.get("message", [""])[0]
+        self._send_html(
+            render_knowledge(
+                settings,
+                TEMPLATE_DIR / "knowledge.html",
+                selected_document=selected_document,
+                chunks=chunks,
+                similar_documents=similar_documents,
+                preview_html=preview_html,
+                preview_mode=preview_mode,
+                selected_chunk=selected_chunk,
+                message=message,
+            )
+        )
+
+    def _handle_knowledge_detail_get(self) -> None:
+        settings = get_settings()
+        query = parse_qs(urlparse(self.path).query)
+        selected_document, chunks, similar_documents, preview_html, preview_mode, selected_chunk = self._build_knowledge_detail_context(settings, query)
+        self._send_html(
+            render_knowledge_detail_panel(
+                selected_document,
+                chunks,
+                similar_documents,
+                preview_html,
+                preview_mode,
+                selected_chunk,
+            )
+        )
+
+    def _build_knowledge_detail_context(self, settings, query: dict):
         selected_document = None
         chunks = []
         preview_html = ""
         preview_mode = normalize_preview_mode(query.get("preview", ["rendered"])[0])
-        message = query.get("message", [""])[0]
         document_id = query.get("document_id", [""])[0].strip()
+        selected_chunk = parse_chunk_index(query.get("selected_chunk", [""])[0])
         if document_id.isdigit():
             selected_document = get_document_by_id(settings.resolved_database_path, int(document_id))
             if selected_document:
@@ -165,18 +237,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 similar_documents = []
         else:
             similar_documents = []
-        self._send_html(
-            render_knowledge(
-                settings,
-                TEMPLATE_DIR / "knowledge.html",
-                selected_document=selected_document,
-                chunks=chunks,
-                similar_documents=similar_documents,
-                preview_html=preview_html,
-                preview_mode=preview_mode,
-                message=message,
-            )
-        )
+        return selected_document, chunks, similar_documents, preview_html, preview_mode, selected_chunk
 
     def _handle_search_get(self) -> None:
         settings = get_settings()
@@ -254,23 +315,41 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
 
         answer = None
         session_id = ""
+        answer_state = "idle"
         if question:
-            session_id = str(create_or_update_chat_session(settings.resolved_database_path, int(selected_session) if selected_session.isdigit() else None, title=question[:40]))
-            history_messages = list_chat_messages(settings.resolved_database_path, int(session_id), limit=12)
-            history = [{"role": item.role, "content": item.content} for item in history_messages]
-            openai_client = build_openai_client(settings, model=model) if settings.openai_api_key and use_llm else None
-            query_agent = QueryAgent(
-                settings.resolved_database_path,
-                openai_client=openai_client,
-                use_llm=bool(openai_client),
-                embedding_tool=build_embedding_tool(settings) if use_embeddings else None,
-                search_mode=search_mode,
-                answer_style=answer_style,
-            )
-            answer = query_agent.answer(question, limit=limit, history=history)
-            add_chat_message(settings.resolved_database_path, int(session_id), "user", question, style=answer_style)
-            add_chat_message(settings.resolved_database_path, int(session_id), "assistant", answer.text, sources=answer.sources, style=answer_style)
-        message = f"已提问：{question}" if question else "请输入问题。"
+            try:
+                session_id = str(create_or_update_chat_session(settings.resolved_database_path, int(selected_session) if selected_session.isdigit() else None, title=question[:40]))
+                history_messages = list_chat_messages(settings.resolved_database_path, int(session_id), limit=12)
+                history = [{"role": item.role, "content": item.content} for item in history_messages]
+                openai_client = build_openai_client(settings, model=model) if settings.openai_api_key and use_llm else None
+                query_agent = QueryAgent(
+                    settings.resolved_database_path,
+                    openai_client=openai_client,
+                    use_llm=bool(openai_client),
+                    embedding_tool=build_embedding_tool(settings) if use_embeddings else None,
+                    search_mode=search_mode,
+                    answer_style=answer_style,
+                )
+                answer = query_agent.answer(question, limit=limit, history=history)
+                add_chat_message(settings.resolved_database_path, int(session_id), "user", question, style=answer_style)
+                add_chat_message(settings.resolved_database_path, int(session_id), "assistant", answer.text, sources=answer.sources, style=answer_style)
+                if answer.mode == "none":
+                    answer_state = "no_results"
+                    message = "你的知识库里暂时没有足够相关的信息。试试换个问法，或者先导入相关资料。"
+                elif answer.mode == "fallback":
+                    answer_state = "model_error"
+                    message = "AI 回答未完整生成，已切换为来源摘要模式。你可以立即重试。"
+                else:
+                    answer_state = "success"
+                    message = f"已提问：{question}"
+            except OpenAIClientError as error:
+                answer_state = "model_error"
+                message = f"模型调用超时或失败：{error}。你可以立即重试，或先改用来源摘要回答。"
+            except Exception as error:
+                answer_state = "config_error"
+                message = f"提问失败：{error}。请检查配置，或稍后重试。"
+        else:
+            message = "请输入问题。"
         sessions = list_chat_sessions(settings.resolved_database_path, limit=20)
         messages = list_chat_messages(settings.resolved_database_path, int(session_id), limit=100) if session_id.isdigit() else []
         self._send_html(
@@ -289,6 +368,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 messages=messages,
                 answer=answer,
                 message=message,
+                answer_state=answer_state,
             )
         )
 
@@ -383,6 +463,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 similar_documents=similar_documents,
                 preview_html=preview_html,
                 preview_mode="rendered",
+                selected_chunk=None,
                 message=message,
             )
         )
@@ -431,6 +512,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 similar_documents=similar_documents,
                 preview_html=preview_html,
                 preview_mode="rendered",
+                selected_chunk=None,
                 message=message,
             )
         )
@@ -512,15 +594,19 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         period = form.get("period", ["daily"])[0]
         write_file = form.get("write_file", [""])[0] == "1"
         review_agent = ReviewAgent(settings.resolved_database_path, settings.resolved_knowledge_dir / "reviews")
-        if period == "weekly":
-            report = review_agent.generate_weekly_review(limit=limit, write_file=write_file)
-            message = "已生成周复盘。"
-        elif period == "monthly":
-            report = review_agent.generate_monthly_review(limit=limit, write_file=write_file)
-            message = "已生成月复盘。"
-        else:
-            report = review_agent.generate_daily_review(limit=limit, write_file=write_file)
-            message = "已生成日复盘。"
+        try:
+            if period == "weekly":
+                report = review_agent.generate_weekly_review(limit=limit, write_file=write_file)
+                message = "已生成周复盘。"
+            elif period == "monthly":
+                report = review_agent.generate_monthly_review(limit=limit, write_file=write_file)
+                message = "已生成月复盘。"
+            else:
+                report = review_agent.generate_daily_review(limit=limit, write_file=write_file)
+                message = "已生成日复盘。"
+        except Exception as error:
+            report = None
+            message = f"复盘生成失败：{error}。请稍后重试。"
         self._send_html(
             render_review(
                 settings,
@@ -667,6 +753,13 @@ def parse_tag_string(raw: str) -> list[str]:
     return [tag.strip() for tag in raw.split(",") if tag.strip()]
 
 
+def parse_chunk_index(raw: str):
+    value = (raw or "").strip()
+    if not value.isdigit():
+        return None
+    return int(value)
+
+
 def extract_search_filters(values: dict) -> dict:
     return {
         "category": values.get("category", [""])[0].strip(),
@@ -675,6 +768,16 @@ def extract_search_filters(values: dict) -> dict:
         "date_from": values.get("date_from", [""])[0].strip(),
         "date_to": values.get("date_to", [""])[0].strip(),
     }
+
+
+def build_prefill_context(context_title: str, context_source: str) -> str:
+    title = (context_title or "").strip()
+    source = (context_source or "").strip()
+    if not title and not source:
+        return ""
+    if title and source:
+        return f"当前问题将围绕《{title}》展开，来源片段：{source}"
+    return f"当前问题将围绕这条搜索结果展开：{title or source}"
 
 
 def slugify_filename(text: str) -> str:

@@ -8,6 +8,7 @@ from app.memory.database import (
     compute_file_hash,
     create_chat_session,
     delete_document,
+    ensure_document_columns,
     find_document_by_hash,
     get_latest_assistant_message,
     get_document_by_id,
@@ -182,6 +183,20 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[1].sources, ["rag.md#chunk-0"])
         self.assertEqual(latest_answer.content, "RAG 是检索增强生成。")
+
+    def test_ensure_document_columns_is_idempotent_for_existing_columns(self):
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "metadata.sqlite"
+            initialize_database(database_path)
+
+            ensure_document_columns(database_path)
+            ensure_document_columns(database_path)
+
+            with sqlite3.connect(database_path) as connection:
+                columns = {row[1] for row in connection.execute("PRAGMA table_info(documents)").fetchall()}
+
+        self.assertIn("file_hash", columns)
+        self.assertIn("people", columns)
 
 
 if __name__ == "__main__":

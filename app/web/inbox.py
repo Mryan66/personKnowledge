@@ -18,6 +18,7 @@ def render_inbox(settings: Settings, template_path: Path, batch: Optional[Ingest
         "file_count": str(len(files)),
         "inbox_files": render_inbox_files(files),
         "result_panel": render_result_panel(batch, message),
+        "getting_started_panel": render_getting_started_panel(settings, files),
     }
     for key, value in replacements.items():
         template = template.replace("{{ " + key + " }}", value)
@@ -26,7 +27,12 @@ def render_inbox(settings: Settings, template_path: Path, batch: Optional[Ingest
 
 def render_inbox_files(files) -> str:
     if not files:
-        return '<tr><td colspan="5" class="muted center">Inbox 暂无可导入文件。支持 .md / .txt / .pdf / .docx / .html / .png / .jpg。</td></tr>'
+        return (
+            '<tr><td colspan="5" class="muted center">'
+            '还没有可导入的文件。把笔记、PDF 或网页资料放进 Inbox 文件夹后，再回来点击导入。'
+            '<br><small>支持 .md / .txt / .pdf / .docx / .html / .png / .jpg。</small>'
+            '</td></tr>'
+        )
     rows = []
     for file_path in files:
         parse_mode = describe_parse_mode(file_path)
@@ -36,7 +42,7 @@ def render_inbox_files(files) -> str:
             f"<td>{escape(file_path.suffix.lower())}</td>"
             f"<td>{format_size(file_path.stat().st_size)}</td>"
             f"<td>{escape(parse_mode)}</td>"
-            f"<td><button type=\"submit\" name=\"path\" value=\"{escape(str(file_path))}\">导入</button></td>"
+            f"<td><button type=\"submit\" name=\"path\" value=\"{escape(str(file_path))}\" data-loading-label=\"正在导入...\">导入</button></td>"
             "</tr>"
         )
     return "\n".join(rows)
@@ -46,10 +52,13 @@ def render_result_panel(batch: Optional[IngestBatchResult], message: str = "") -
     if batch is None and not message:
         return ""
 
-    parts = ['<section class="panel result-panel">', '<div class="panel-heading"><h2>导入结果</h2><p>显示本次导入的成功与失败文档。</p></div>']
+    parts = ['<section class="panel result-panel" data-result-panel>', '<div class="panel-heading"><h2>导入结果</h2><p>显示本次导入的成功、失败与下一步建议。</p></div>', '<p class="sr-only" aria-live="polite" data-live-region></p>']
     if message:
         parts.append(f'<p class="notice">{escape(message)}</p>')
     if batch:
+        summary = build_batch_summary(batch)
+        if summary:
+            parts.append(f'<div class="summary-card">{summary}</div>')
         if batch.successes:
             parts.append('<h3>成功</h3><ul class="result-list success-list">')
             for result in batch.successes:
@@ -70,6 +79,45 @@ def render_result_panel(batch: Optional[IngestBatchResult], message: str = "") -
             parts.append('<p class="muted">没有发现可导入文件。</p>')
     parts.append("</section>")
     return "\n".join(parts)
+
+
+def render_getting_started_panel(settings: Settings, files) -> str:
+    inbox_path = escape(str(settings.resolved_inbox_dir))
+    if files:
+        return (
+            '<section class="panel result-panel" data-result-panel>'
+            '<div class="panel-heading"><h2>第一步：把文件放进来</h2><p>你已经有可导入文件了，接下来可以直接开始导入。</p></div>'
+            '<p class="notice">已在 Inbox 中发现文件。建议先点击“导入全部文件”，完成第一次体验。</p>'
+            '<p class="sr-only" aria-live="polite" data-live-region></p>'
+            '</section>'
+        )
+    return (
+        '<section class="panel result-panel" data-result-panel>'
+        '<div class="panel-heading"><h2>第一步：先放一点资料进来</h2><p>从这里开始最轻松。先把几篇笔记或 1 个 PDF 放进 Inbox 文件夹，再回来点击导入。</p></div>'
+        '<div class="task-grid">'
+        '<article class="task-card static-card"><span class="task-step">动作 1</span><strong>打开 Inbox 文件夹</strong><p>当前路径：{path}</p></article>'
+        '<article class="task-card static-card"><span class="task-step">动作 2</span><strong>拖入你的资料</strong><p>支持 md、txt、pdf、docx、html、jpg、png。</p></article>'
+        '<article class="task-card static-card"><span class="task-step">动作 3</span><strong>导入示例文件</strong><p>如果你只想先体验一次，可以先导入系统准备的示例文档。</p></article>'
+        '</div>'
+        '<div class="toolbar">'
+        '<form method="post" action="/inbox/sample" class="inline-action-form"><button type="submit" data-loading-label="正在准备示例...">导入示例文件</button></form>'
+        '<button type="button" class="secondary-button" data-copy-path="{path}">复制 Inbox 路径</button>'
+        '</div>'
+        '<p class="sr-only" aria-live="polite" data-live-region></p>'
+        '</section>'
+    ).format(path=inbox_path)
+
+
+def build_batch_summary(batch: IngestBatchResult) -> str:
+    success_count = len(batch.successes)
+    failure_count = len(batch.failures)
+    if success_count and not failure_count:
+        return f"导入完成，已新增 {success_count} 篇知识。现在你可以去搜索，或者直接向 AI 提问。"
+    if success_count and failure_count:
+        return f"本次导入成功 {success_count} 篇，失败 {failure_count} 篇。你可以先继续使用成功导入的内容，再查看失败原因。"
+    if failure_count:
+        return f"这次导入没有成功，失败 {failure_count} 项。请先根据下方原因调整后重试。"
+    return ""
 
 
 def format_size(size: int) -> str:

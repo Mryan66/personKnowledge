@@ -9,6 +9,7 @@ from app.tools.openai_client import OpenAIClientError
 
 @dataclass(frozen=True)
 class SearchResult:
+    document_id: int
     source_path: str
     title: str
     summary: str
@@ -147,6 +148,7 @@ class SearchTool:
 
     def _map_record(self, record, mode: str, override_score: Optional[float] = None) -> SearchResult:
         return SearchResult(
+            document_id=record.document_id,
             source_path=record.source_path,
             title=record.title,
             summary=record.summary,

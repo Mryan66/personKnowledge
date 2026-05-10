@@ -10,13 +10,13 @@
   <aside class="sidebar">
     <div class="brand">AI 知识管家</div>
     <nav>
-      <a href="/dashboard">Dashboard</a>
-      <a href="/inbox">Inbox 导入</a>
-      <a href="/knowledge">Knowledge 知识库</a>
-      <a href="/search">Search 搜索</a>
-      <a class="active" href="/ask">Ask AI</a>
-      <a href="/review">Review 复盘</a>
-      <a href="/settings">Settings 设置</a>
+      <a href="/dashboard">首页</a>
+      <a href="/inbox">导入资料</a>
+      <a href="/knowledge">知识库</a>
+      <a href="/search">搜索</a>
+      <a class="active" href="/ask">AI 问答</a>
+      <a href="/review">知识复盘</a>
+      <a href="/settings">设置</a>
     </nav>
   </aside>
 
@@ -25,7 +25,7 @@
       <div>
         <p class="eyebrow">Ask AI</p>
         <h1>向知识库提问</h1>
-        <p>基于已导入文档检索来源，并在可用时调用 OpenAI 生成 RAG 总结回答。</p>
+        <p>先从你的资料里找依据，再给出可继续追问的回答。</p>
       </div>
       <div class="status-panel">
         <div><span>OpenAI</span><strong class="{{ openai_status_class }}">{{ openai_status }}</strong></div>
@@ -51,9 +51,9 @@
     <section class="panel">
       <div class="panel-heading">
         <h2>提问设置</h2>
-        <p>未配置 OpenAI 时会自动使用来源型回答。</p>
+        <p>直接输入问题即可。未配置 OpenAI 时，会自动改用来源摘要回答。</p>
       </div>
-      <form class="ask-form" method="post" action="/ask">
+      <form class="ask-form progress-form" method="post" action="/ask" data-progress-text="正在检索相关知识并组织回答...">
         <input type="hidden" name="session_id" value="{{ session_id }}">
         <label class="question-field">
           问题
@@ -65,34 +65,40 @@
             <select name="session_id_selector">{{ session_options }}</select>
           </label>
           <label>
-            检索模式
-            <select name="search_mode">{{ search_mode_options }}</select>
-          </label>
-          <label>
-            来源数量
-            <input type="number" name="limit" value="{{ limit }}" min="1" max="10">
-          </label>
-          <label>
-            模型
-            <input type="text" name="model" value="{{ model }}">
-          </label>
-          <label>
             回答风格
             <select name="answer_style">{{ answer_style_options }}</select>
           </label>
-          <label class="checkbox-label">
-            <input type="checkbox" name="use_llm" value="1" {{ use_llm_checked }}>
-            使用 LLM 生成回答
-          </label>
-          <label class="checkbox-label">
-            <input type="checkbox" name="use_embeddings" value="1" {{ use_embeddings_checked }}>
-            启用向量检索
-          </label>
         </div>
-        <button type="submit">提问</button>
+        <details class="advanced-settings">
+          <summary>高级设置</summary>
+          <div class="ask-options">
+            <label>
+              搜索模式
+              <select name="search_mode">{{ search_mode_options }}</select>
+            </label>
+            <label>
+              来源数量
+              <input type="number" name="limit" value="{{ limit }}" min="1" max="10">
+            </label>
+            <label>
+              模型
+              <input type="text" name="model" value="{{ model }}">
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" name="use_llm" value="1" {{ use_llm_checked }}>
+              使用 AI 生成回答
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" name="use_embeddings" value="1" {{ use_embeddings_checked }}>
+              增强语义理解（推荐）
+            </label>
+          </div>
+        </details>
+        <button type="submit" data-loading-label="正在生成回答...">开始提问</button>
       </form>
     </section>
 
+    {{ prefill_context_panel }}
     {{ conversation_panel }}
     {{ answer_panel }}
     {{ session_history_panel }}
@@ -116,6 +122,9 @@
 (function() {
   const prompts = document.getElementById('quick-prompts');
   const textarea = document.querySelector('textarea[name="question"]');
+  const form = document.querySelector('.progress-form');
+  const liveRegion = document.querySelector('[data-live-region]');
+  const resultPanel = document.querySelector('[data-result-panel]');
   if (!prompts || !textarea) return;
 
   prompts.addEventListener('click', function(e) {
@@ -125,6 +134,22 @@
     textarea.focus();
     textarea.scrollTop = textarea.scrollHeight;
   });
+
+  if (form) {
+    form.addEventListener('submit', function() {
+      const button = form.querySelector('button[type="submit"]');
+      if (button) {
+        button.disabled = true;
+        button.textContent = button.getAttribute('data-loading-label') || '正在处理中...';
+      }
+      if (liveRegion) {
+        liveRegion.textContent = form.getAttribute('data-progress-text') || '正在检索相关知识并组织回答...';
+      }
+      if (resultPanel) {
+        resultPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
 })();
 </script>
 </body>

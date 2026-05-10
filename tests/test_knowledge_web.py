@@ -64,7 +64,8 @@ class KnowledgeWebTests(unittest.TestCase):
             ]
         )
 
-        self.assertIn("/knowledge?document_id=3", html)
+        self.assertIn('/knowledge?document_id=3#document-detail-panel', html)
+        self.assertIn('data-detail-link="1"', html)
         self.assertIn('name="selected_document_id"', html)
 
     def test_render_document_status(self):
@@ -120,7 +121,7 @@ class KnowledgeWebTests(unittest.TestCase):
             document = get_document_by_id(database_path, result.document_id)
             chunks = list_chunks(database_path, result.document_id)
 
-            html = render_document_detail_panel(document, chunks, [], "<p>preview</p>", "rendered")
+            html = render_document_detail_panel(document, chunks, [], "<p>preview</p>", "rendered", None)
 
         self.assertIn("文档详情", html)
         self.assertIn("文档预览", html)
@@ -130,6 +131,7 @@ class KnowledgeWebTests(unittest.TestCase):
         self.assertIn("保存元数据", html)
         self.assertIn("重新导入", html)
         self.assertIn("删除文档", html)
+        self.assertIn('id="document-detail-panel"', html)
 
     def test_render_document_detail_panel_includes_structured_metadata(self):
         with TemporaryDirectory() as temporary_directory:
@@ -144,7 +146,7 @@ class KnowledgeWebTests(unittest.TestCase):
             document = get_document_by_id(database_path, result.document_id)
             chunks = list_chunks(database_path, result.document_id)
 
-            html = render_document_detail_panel(document, chunks, [], "<p>preview</p>", "rendered")
+            html = render_document_detail_panel(document, chunks, [], "<p>preview</p>", "rendered", None)
 
         self.assertIn("张三", html)
         self.assertIn("2026-05-10", html)
@@ -258,6 +260,7 @@ def get_document_by_id_for_test(
                 [{"id": second_result.document_id, "title": "RAG 二", "summary": "Agent memory 实践。", "category": "agent", "similarity_score": 6}],
                 "<p>preview</p>",
                 "rendered",
+                None,
             )
 
         self.assertIn("相似文档", html)
@@ -288,6 +291,7 @@ def get_document_by_id_for_test(
                 similar_documents=[{"id": 2, "title": "相似", "summary": "摘要", "category": "rag", "similarity_score": 5}],
                 preview_html="<p>preview</p>",
                 preview_mode="raw",
+                selected_chunk=0,
                 message="done",
             )
 
@@ -299,6 +303,7 @@ def get_document_by_id_for_test(
         self.assertIn("文档预览", html)
         self.assertIn("相似文档", html)
         self.assertIn("原始文本", html)
+        self.assertIn("chunk-card-active", html)
 
 
 if __name__ == "__main__":

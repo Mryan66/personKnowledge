@@ -10,13 +10,13 @@
   <aside class="sidebar">
     <div class="brand">AI 知识管家</div>
     <nav>
-      <a href="/dashboard">Dashboard</a>
-      <a href="/inbox">Inbox 导入</a>
-      <a class="active" href="/knowledge">Knowledge 知识库</a>
-      <a href="/search">Search 搜索</a>
-      <a href="/ask">Ask AI</a>
-      <a href="/review">Review 复盘</a>
-      <a href="/settings">Settings 设置</a>
+      <a href="/dashboard">首页</a>
+      <a href="/inbox">导入资料</a>
+      <a class="active" href="/knowledge">知识库</a>
+      <a href="/search">搜索</a>
+      <a href="/ask">AI 问答</a>
+      <a href="/review">知识复盘</a>
+      <a href="/settings">设置</a>
     </nav>
   </aside>
 
@@ -105,6 +105,63 @@
 <script>
 (function() {
   const filterInput = document.getElementById('knowledge-filter');
+  const detailPanel = document.getElementById('document-detail-panel');
+  const activeChunk = document.querySelector('.chunk-card-active');
+  const detailLinks = document.querySelectorAll('[data-detail-link="1"]');
+  const scrollKey = 'knowledge-detail-scroll-target';
+
+  detailLinks.forEach(function(link) {
+    link.addEventListener('click', function() {
+      try {
+        sessionStorage.setItem(scrollKey, 'document-detail-panel');
+      } catch (e) {
+      }
+    });
+  });
+
+  function forceScrollToElement(element, block) {
+    if (!element) return;
+    const top = Math.max(0, window.scrollY + element.getBoundingClientRect().top - 24);
+    window.scrollTo({ top: top, behavior: 'auto' });
+    if (block === 'center') {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  const shouldRestoreDetail = !!detailPanel && (
+    window.location.hash === '#document-detail-panel' ||
+    window.location.search.indexOf('document_id=') >= 0 ||
+    (function() {
+      try {
+        return sessionStorage.getItem(scrollKey) === 'document-detail-panel';
+      } catch (e) {
+        return false;
+      }
+    })()
+  );
+
+  if (activeChunk) {
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        forceScrollToElement(activeChunk, 'center');
+      });
+    });
+  } else if (shouldRestoreDetail) {
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() {
+        forceScrollToElement(detailPanel, 'start');
+      });
+    });
+  }
+
+  try {
+    if (shouldRestoreDetail) {
+      sessionStorage.removeItem(scrollKey);
+    }
+  } catch (e) {
+  }
   if (!filterInput) return;
 
   const table = filterInput.closest('.page').querySelector('.data-table');

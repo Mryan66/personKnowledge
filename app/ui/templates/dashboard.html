@@ -10,13 +10,13 @@
   <aside class="sidebar">
     <div class="brand">AI 知识管家</div>
     <nav>
-      <a class="active" href="/dashboard">Dashboard</a>
-      <a href="/inbox">Inbox 导入</a>
-      <a href="/knowledge">Knowledge 知识库</a>
-      <a href="/search">Search 搜索</a>
-      <a href="/ask">Ask AI</a>
-      <a href="/review">Review 复盘</a>
-      <a href="/settings">Settings 设置</a>
+      <a class="active" href="/dashboard">首页</a>
+      <a href="/inbox">导入资料</a>
+      <a href="/knowledge">知识库</a>
+      <a href="/search">搜索</a>
+      <a href="/ask">AI 问答</a>
+      <a href="/review">知识复盘</a>
+      <a href="/settings">设置</a>
     </nav>
   </aside>
 
@@ -25,12 +25,12 @@
       <div>
         <p class="eyebrow">Personal AI Knowledge Butler</p>
         <h1>{{ app_name }}</h1>
-        <p>本地优先的个人知识整理、搜索、问答和复盘系统。</p>
+        <p>导入资料、搜索知识、向 AI 提问，并自动生成复盘。</p>
       </div>
       <div class="status-panel">
         <div><span>OpenAI</span><strong class="{{ openai_status_class }}">{{ openai_status }}</strong></div>
-        <div><span>检索模式</span><strong>{{ search_status }}</strong></div>
-        <div><span>最近 Review</span><strong>{{ recent_review }}</strong></div>
+        <div><span>知识搜索</span><strong>{{ search_status }}</strong></div>
+        <div><span>最近复盘</span><strong>{{ recent_review }}</strong></div>
       </div>
     </header>
 
@@ -43,16 +43,10 @@
 
     <section class="panel">
       <div class="panel-heading">
-        <h2>快捷操作</h2>
-        <p>快速导航到常用功能。</p>
+        <h2>开始使用</h2>
+        <p>先完成这 4 步，就能体验到完整的知识助手流程。</p>
       </div>
-      <div class="actions">
-        <a href="/inbox">导入文件</a>
-        <a href="/search">打开搜索</a>
-        <a href="/ask">向 AI 提问</a>
-        <a href="/review">生成复盘</a>
-        <a href="/settings">查看设置</a>
-      </div>
+      {{ onboarding_panel }}
     </section>
 
     {{ growth_panel }}
@@ -71,21 +65,21 @@
       <article class="panel">
         <div class="panel-heading">
           <h2>当前状态</h2>
-          <p>用于确认系统是否具备 RAG 和向量检索能力。</p>
+          <p>帮助你确认系统已经准备好开始导入、搜索和提问。</p>
         </div>
         <dl class="status-list">
           <div><dt>OpenAI API</dt><dd class="{{ openai_status_class }}">{{ openai_status }}</dd></div>
           <div><dt>默认搜索</dt><dd>{{ search_status }}</dd></div>
-          <div><dt>Embedding</dt><dd>已入库向量：{{ embedding_count }}</dd></div>
-          <div><dt>Review</dt><dd>{{ recent_review }}</dd></div>
+          <div><dt>语义索引</dt><dd>已入库向量：{{ embedding_count }}</dd></div>
+          <div><dt>最近复盘</dt><dd>{{ recent_review }}</dd></div>
         </dl>
       </article>
     </section>
 
     <section class="panel">
       <div class="panel-heading">
-        <h2>未来功能</h2>
-        <p>以下模块规划中。</p>
+        <h2>接下来可以做</h2>
+        <p>这些能力会让你的知识库更快进入日常使用节奏。</p>
       </div>
       <div class="placeholder-grid">
         {{ placeholder_cards }}

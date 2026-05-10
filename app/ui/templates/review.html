@@ -10,13 +10,13 @@
   <aside class="sidebar">
     <div class="brand">AI 知识管家</div>
     <nav>
-      <a href="/dashboard">Dashboard</a>
-      <a href="/inbox">Inbox 导入</a>
-      <a href="/knowledge">Knowledge 知识库</a>
-      <a href="/search">Search 搜索</a>
-      <a href="/ask">Ask AI</a>
-      <a class="active" href="/review">Review 复盘</a>
-      <a href="/settings">Settings 设置</a>
+      <a href="/dashboard">首页</a>
+      <a href="/inbox">导入资料</a>
+      <a href="/knowledge">知识库</a>
+      <a href="/search">搜索</a>
+      <a href="/ask">AI 问答</a>
+      <a class="active" href="/review">知识复盘</a>
+      <a href="/settings">设置</a>
     </nav>
   </aside>
 
@@ -25,7 +25,7 @@
       <div>
         <p class="eyebrow">Review</p>
         <h1>知识复盘</h1>
-        <p>生成每日/每周/每月 Review，汇总最近文档、高频标签、主要分类和建议行动。</p>
+        <p>用 10 秒钟回顾最近知识变化，快速看到主题和下一步建议。</p>
       </div>
       <div class="status-panel">
         <div><span>Review 目录</span><strong>{{ reviews_dir }}</strong></div>
@@ -37,9 +37,9 @@
     <section class="panel">
       <div class="panel-heading">
         <h2>生成复盘</h2>
-        <p>基于最近入库文档生成 Markdown 报告。</p>
+        <p>基于最近入库文档生成 Markdown 报告，并提炼关键关注点。</p>
       </div>
-      <form class="review-form" method="post" action="/review">
+      <form class="review-form progress-form" method="post" action="/review" data-progress-text="正在整理最近知识并生成复盘...">
         <label>
           复盘周期
           <select name="period">{{ period_options }}</select>
@@ -52,7 +52,7 @@
           <input type="checkbox" name="write_file" value="1" {{ write_file_checked }}>
           写入 Review 文件
         </label>
-        <button type="submit">生成复盘</button>
+        <button type="submit" data-loading-label="正在生成复盘...">生成复盘</button>
       </form>
     </section>
 
@@ -69,5 +69,27 @@
       </ul>
     </section>
   </main>
+<script>
+(function() {
+  const form = document.querySelector('.progress-form');
+  const liveRegion = document.querySelector('[data-live-region]');
+  const resultPanel = document.querySelector('[data-result-panel]');
+  if (!form) return;
+
+  form.addEventListener('submit', function() {
+    const button = form.querySelector('button[type="submit"]');
+    if (button) {
+      button.disabled = true;
+      button.textContent = button.getAttribute('data-loading-label') || '正在处理中...';
+    }
+    if (liveRegion) {
+      liveRegion.textContent = form.getAttribute('data-progress-text') || '正在整理最近知识并生成复盘...';
+    }
+    if (resultPanel) {
+      resultPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+})();
+</script>
 </body>
 </html>

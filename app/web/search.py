@@ -1,14 +1,15 @@
 from html import escape
 from pathlib import Path
 from typing import List
+from urllib.parse import quote
 
 from app.config import Settings
 from app.tools.search_tool import SearchResult
 
 SEARCH_MODES = {
-    "auto": "Auto：混合搜索（关键词 + 向量）+ Rerank",
-    "keyword": "Keyword：按标题、标签、分类、摘要和正文匹配",
-    "vector": "Vector：使用 Embedding 语义相似度检索",
+    "auto": "智能搜索（关键词 + 语义理解）",
+    "keyword": "关键词搜索（标题、标签、分类和正文）",
+    "vector": "语义搜索（按内容含义理解）",
 }
 
 
@@ -63,15 +64,16 @@ def render_results_panel(results: List[SearchResult], query: str, message: str =
     if not query and not message:
         return ""
 
-    parts = ['<section class="panel result-panel">', '<div class="panel-heading"><h2>搜索结果</h2><p>展示匹配的知识库 chunk。</p></div>']
+    parts = ['<section class="panel result-panel" data-result-panel>', '<div class="panel-heading"><h2>搜索结果</h2><p>展示最相关的知识片段，并给你下一步动作。</p></div>', '<p class="sr-only" aria-live="polite" data-live-region></p>']
     if message:
         parts.append(f'<p class="notice">{escape(message)}</p>')
     active_filters = render_active_filters(filters)
     if active_filters:
         parts.append(active_filters)
     if query and not results:
-        parts.append(f'<p class="muted">没有找到与 “{escape(query)}” 相关的结果。</p>')
+        parts.append(f'<div class="summary-card">没有找到与 “{escape(query)}” 相关的内容。试试换个关键词，或者先导入更多资料。</div>')
     if results:
+        parts.append(f'<div class="summary-card">已找到 {len(results)} 条相关内容。最匹配的是下面这几条，你可以继续问 AI 或回到原文。</div>')
         parts.append('<div class="search-results">')
         for index, result in enumerate(results, start=1):
             tag_text = ", ".join(result.tags) if result.tags else "暂无标签"
@@ -90,6 +92,7 @@ def render_results_panel(results: List[SearchResult], query: str, message: str =
                 '</dl>'
                 f'<small class="source-path">{escape(result.source_path)}#chunk-{result.chunk_index}</small>'
                 f'<div class="tag-line">{escape(tag_text)}</div>'
+                f'<div class="card-actions">{render_result_actions(result)}</div>'
                 '</div>'
                 '</article>'
             )
@@ -142,3 +145,26 @@ def build_snippet(content: str, max_length: int = 260) -> str:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 1].rstrip() + "…"
+
+
+def render_result_actions(result: SearchResult) -> str:
+    ask_prompt = build_follow_up_prompt(result)
+    ask_url = (
+        "/ask?question="
+        + quote(ask_prompt)
+        + "&context_title="
+        + quote(result.title or "Untitled")
+        + "&context_source="
+        + quote(f"{result.source_path}#chunk-{result.chunk_index}")
+    )
+    knowledge_url = f"/knowledge?document_id={result.document_id}&selected_chunk={result.chunk_index}#document-detail-panel"
+    return (
+        f'<a href="{escape(ask_url)}">围绕这条继续问</a>'
+        f'<a href="{escape(knowledge_url)}">查看原文片段</a>'
+    )
+
+
+def build_follow_up_prompt(result: SearchResult) -> str:
+    title = result.title or "这条资料"
+    snippet = build_snippet(result.content, max_length=80)
+    return f"请基于《{title}》这条资料，解释它的重点，并告诉我下一步可以继续追问什么。参考内容：{snippet}"

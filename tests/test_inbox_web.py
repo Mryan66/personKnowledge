@@ -4,7 +4,14 @@ from tempfile import TemporaryDirectory
 
 from app.config import Settings
 from app.ingest.pipeline import ingest_path
-from app.web.inbox import format_size, render_inbox, render_inbox_files, render_result_panel
+from app.web.inbox import (
+    build_batch_summary,
+    format_size,
+    render_getting_started_panel,
+    render_inbox,
+    render_inbox_files,
+    render_result_panel,
+)
 
 
 class InboxWebTests(unittest.TestCase):
@@ -15,7 +22,7 @@ class InboxWebTests(unittest.TestCase):
     def test_render_inbox_files_empty_state(self):
         html = render_inbox_files([])
 
-        self.assertIn("Inbox 暂无可导入文件", html)
+        self.assertIn("还没有可导入的文件", html)
 
     def test_render_inbox_lists_supported_files(self):
         with TemporaryDirectory() as temporary_directory:
@@ -41,6 +48,31 @@ class InboxWebTests(unittest.TestCase):
         self.assertIn("导入结果", html)
         self.assertIn("Inbox 测试", html)
         self.assertIn("done", html)
+        self.assertIn("导入完成", html)
+
+    def test_render_getting_started_panel_with_empty_inbox(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            inbox_dir = root / "inbox"
+            inbox_dir.mkdir()
+            settings = Settings(workspace_dir=root, inbox_dir=inbox_dir)
+
+            html = render_getting_started_panel(settings, [])
+
+        self.assertIn("第一步：先放一点资料进来", html)
+        self.assertIn("导入示例文件", html)
+
+    def test_build_batch_summary_with_failures(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            note = root / "note.md"
+            note.write_text("# Inbox 测试", encoding="utf-8")
+            batch = ingest_path(note, database_path)
+
+        summary = build_batch_summary(batch)
+
+        self.assertIn("已新增 1 篇知识", summary)
 
     def test_render_inbox_page_includes_form_and_table(self):
         with TemporaryDirectory() as temporary_directory:

@@ -743,6 +743,8 @@ def get_dashboard_stats(database_path: Path, recent_limit: int = 5) -> dict:
         document_count = connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
         chunk_count = connection.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
         embedding_count = connection.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+        search_count = connection.execute("SELECT COUNT(*) FROM search_history").fetchone()[0]
+        ask_count = connection.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()[0]
         tag_rows = connection.execute("SELECT tags FROM documents").fetchall()
         recent_rows = connection.execute(
             """
@@ -765,6 +767,8 @@ def get_dashboard_stats(database_path: Path, recent_limit: int = 5) -> dict:
         "document_count": document_count,
         "chunk_count": chunk_count,
         "embedding_count": embedding_count,
+        "search_count": search_count,
+        "ask_count": ask_count,
         "tag_count": len(tags),
         "recent_documents": [_document_from_row(row) for row in recent_rows],
     }
@@ -884,8 +888,14 @@ def ensure_document_columns(database_path: Path) -> None:
             for column_name, column_type in additions.items():
                 if column_name in column_names:
                     continue
-                connection.execute(f"ALTER TABLE documents ADD COLUMN {column_name} {column_type}")
-                column_names.add(column_name)
+                try:
+                    connection.execute(f"ALTER TABLE documents ADD COLUMN {column_name} {column_type}")
+                    column_names.add(column_name)
+                except sqlite3.OperationalError as error:
+                    if "duplicate column name" not in str(error).lower():
+                        raise
+                    refreshed_rows = connection.execute("PRAGMA table_info(documents)").fetchall()
+                    column_names = {row[1] for row in refreshed_rows}
 
 
 def compute_file_hash(path: Path) -> str:
