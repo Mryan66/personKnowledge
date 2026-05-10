@@ -45,7 +45,7 @@ class DashboardTests(unittest.TestCase):
             template_path.write_text(
                 "{{ app_name }} {{ document_count }} {{ chunk_count }} {{ embedding_count }} "
                 "{{ tag_count }} {{ recent_documents }} {{ recent_review }} {{ openai_status }} "
-                "{{ openai_status_class }} {{ search_status }} {{ placeholder_cards }}",
+                "{{ openai_status_class }} {{ search_status }} {{ growth_panel }} {{ placeholder_cards }}",
                 encoding="utf-8",
             )
             note = root / "note.md"
@@ -58,7 +58,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("Personal AI Knowledge Butler", html)
         self.assertIn("首页", html)
         self.assertIn("未配置", html)
-        self.assertIn("知识增长趋势图", html)
+        self.assertIn("知识增长", html)
 
 
 if __name__ == "__main__":

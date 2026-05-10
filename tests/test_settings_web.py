@@ -115,7 +115,7 @@ class SettingsWebTests(unittest.TestCase):
         self.assertIn("Personal AI Knowledge Butler", html)
         self.assertIn("未配置", html)
         self.assertIn("KB_DATABASE_PATH", html)
-        self.assertIn("保存 OpenAI 配置", html)
+        self.assertIn("保存配置", html)
 
 
 if __name__ == "__main__":
