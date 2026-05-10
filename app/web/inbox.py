@@ -26,15 +26,16 @@ def render_inbox(settings: Settings, template_path: Path, batch: Optional[Ingest
 
 def render_inbox_files(files) -> str:
     if not files:
-        return '<tr><td colspan="5" class="muted center">Inbox 暂无可导入文件。支持 .md / .txt / .pdf。</td></tr>'
+        return '<tr><td colspan="5" class="muted center">Inbox 暂无可导入文件。支持 .md / .txt / .pdf / .docx / .html / .png / .jpg。</td></tr>'
     rows = []
     for file_path in files:
+        parse_mode = describe_parse_mode(file_path)
         rows.append(
             "<tr>"
             f"<td><strong>{escape(file_path.name)}</strong><small>{escape(str(file_path))}</small></td>"
             f"<td>{escape(file_path.suffix.lower())}</td>"
             f"<td>{format_size(file_path.stat().st_size)}</td>"
-            f"<td>{'PDF 文本层' if file_path.suffix.lower() == '.pdf' else '文本'}</td>"
+            f"<td>{escape(parse_mode)}</td>"
             f"<td><button type=\"submit\" name=\"path\" value=\"{escape(str(file_path))}\">导入</button></td>"
             "</tr>"
         )
@@ -52,9 +53,10 @@ def render_result_panel(batch: Optional[IngestBatchResult], message: str = "") -
         if batch.successes:
             parts.append('<h3>成功</h3><ul class="result-list success-list">')
             for result in batch.successes:
+                status_text = build_result_status_text(result)
                 parts.append(
                     f'<li><strong>{escape(result.title)}</strong><span>{escape(str(result.source_path))}</span>'
-                    f'<small>chunks: {result.chunk_count} · embeddings: {result.embedding_count}</small></li>'
+                    f'<small>chunks: {result.chunk_count} · embeddings: {result.embedding_count} · {escape(status_text)}</small></li>'
                 )
             parts.append("</ul>")
         if batch.failures:
@@ -76,3 +78,26 @@ def format_size(size: int) -> str:
     if size < 1024 * 1024:
         return f"{size / 1024:.1f} KB"
     return f"{size / 1024 / 1024:.1f} MB"
+
+
+def describe_parse_mode(file_path: Path) -> str:
+    extension = file_path.suffix.lower()
+    if extension == ".pdf":
+        return "PDF 文本层 / OCR"
+    if extension == ".docx":
+        return "Word 文本提取"
+    if extension in {".html", ".htm"}:
+        return "HTML 文本提取"
+    if extension in {".png", ".jpg", ".jpeg"}:
+        return "图片 OCR"
+    return "文本"
+
+
+def build_result_status_text(result) -> str:
+    if getattr(result, "status", "") == "duplicate":
+        duplicate_of = getattr(result, "duplicate_of_document_id", None)
+        return f"重复文件，已跳过（文档 #{duplicate_of}）" if duplicate_of else "重复文件，已跳过"
+    if getattr(result, "status", "") == "similar":
+        count = len(getattr(result, "duplicate_candidates", []) or [])
+        return f"发现 {count} 个潜在重复候选"
+    return "已入库"

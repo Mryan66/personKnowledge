@@ -6,7 +6,7 @@ from app.agents.organizer_agent import OrganizerAgent
 from app.ingest.chunker import chunk_text
 from app.ingest.parser import DocumentParseError, UnsupportedFileTypeError, parse_document
 from app.ingest.scanner import scan_inbox
-from app.memory.database import upsert_document
+from app.memory.database import compute_file_hash, find_document_by_hash, list_potential_duplicates, upsert_document
 from app.tools.embedding_tool import EmbeddingTool
 from app.tools.openai_client import OpenAIClientError
 
@@ -21,6 +21,9 @@ class IngestResult:
     category: str
     chunk_count: int
     embedding_count: int = 0
+    status: str = "ingested"
+    duplicate_of_document_id: Optional[int] = None
+    duplicate_candidates: List[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,22 @@ def ingest_file(
     organizer_agent: Optional[OrganizerAgent] = None,
     enable_ocr: bool = False,
 ) -> IngestResult:
+    file_hash = compute_file_hash(path)
+    existing = find_document_by_hash(database_path, file_hash)
+    if existing and Path(existing.source_path) != path:
+        return IngestResult(
+            source_path=path,
+            document_id=existing.id,
+            title=existing.title,
+            summary=existing.summary,
+            tags=existing.tags,
+            category=existing.category,
+            chunk_count=0,
+            embedding_count=0,
+            status="duplicate",
+            duplicate_of_document_id=existing.id,
+        )
+
     content = parse_document(path, enable_ocr=enable_ocr)
     if not content:
         raise DocumentParseError(
@@ -69,15 +88,23 @@ def ingest_file(
     document_id = upsert_document(
         database_path=database_path,
         source_path=path,
+        file_hash=file_hash,
         title=organization.title,
         summary=organization.summary,
         tags=organization.tags,
         category=organization.category,
+        authors=organization.authors,
+        dates=organization.dates,
+        people=organization.people,
+        organizations=organization.organizations,
+        source_url=organization.source_url,
         chunks=chunks,
     )
     embedding_count = 0
     if embedding_tool:
         embedding_count = embedding_tool.embed_document_chunks(database_path, document_id)
+    duplicate_candidates = [item["id"] for item in list_potential_duplicates(database_path, document_id, limit=5)]
+    status = "similar" if duplicate_candidates else "ingested"
     return IngestResult(
         source_path=path,
         document_id=document_id,
@@ -87,6 +114,8 @@ def ingest_file(
         category=organization.category,
         chunk_count=len(chunks),
         embedding_count=embedding_count,
+        status=status,
+        duplicate_candidates=duplicate_candidates,
     )
 
 

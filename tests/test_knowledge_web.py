@@ -14,8 +14,10 @@ from app.web.knowledge import (
     render_category_filters,
     render_document_detail_panel,
     render_document_rows,
+    render_document_status,
     render_embedding_status,
     render_knowledge,
+    render_metadata_facts,
     render_message_panel,
     render_preview_toolbar,
     render_similar_documents,
@@ -65,6 +67,28 @@ class KnowledgeWebTests(unittest.TestCase):
         self.assertIn("/knowledge?document_id=3", html)
         self.assertIn('name="selected_document_id"', html)
 
+    def test_render_document_status(self):
+        self.assertIn("status-ok", render_document_status({"status": "ingested"}))
+        self.assertIn("duplicate", render_document_status({"status": "duplicate"}))
+        self.assertIn("similar", render_document_status({"status": "similar"}))
+
+    def test_render_metadata_facts(self):
+        document = get_document_by_id_for_test(
+            authors=["张三"],
+            dates=["2026-05-10"],
+            people=["李四"],
+            organizations=["OpenAI"],
+            source_url="https://example.com",
+        )
+
+        html = render_metadata_facts(document)
+
+        self.assertIn("张三", html)
+        self.assertIn("2026-05-10", html)
+        self.assertIn("李四", html)
+        self.assertIn("OpenAI", html)
+        self.assertIn("https://example.com", html)
+
     def test_render_embedding_status(self):
         self.assertIn("status-ok", render_embedding_status(2, 2))
         self.assertIn("status-warn", render_embedding_status(2, 0))
@@ -106,6 +130,53 @@ class KnowledgeWebTests(unittest.TestCase):
         self.assertIn("保存元数据", html)
         self.assertIn("重新导入", html)
         self.assertIn("删除文档", html)
+
+    def test_render_document_detail_panel_includes_structured_metadata(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            note = root / "note.md"
+            note.write_text(
+                "# 知识详情\n\n作者：张三\n日期：2026-05-10\n人物：李四\n公司：OpenAI\n链接：https://example.com\n",
+                encoding="utf-8",
+            )
+            result = ingest_file(note, database_path)
+            document = get_document_by_id(database_path, result.document_id)
+            chunks = list_chunks(database_path, result.document_id)
+
+            html = render_document_detail_panel(document, chunks, [], "<p>preview</p>", "rendered")
+
+        self.assertIn("张三", html)
+        self.assertIn("2026-05-10", html)
+        self.assertIn("李四", html)
+        self.assertIn("OpenAI", html)
+        self.assertIn("https://example.com", html)
+
+
+def get_document_by_id_for_test(
+    authors=None,
+    dates=None,
+    people=None,
+    organizations=None,
+    source_url="",
+):
+    class FakeDocument:
+        pass
+
+    document = FakeDocument()
+    document.id = 1
+    document.source_path = "/tmp/test.md"
+    document.title = "测试"
+    document.summary = "摘要"
+    document.tags = ["rag"]
+    document.category = "notes"
+    document.status = "ingested"
+    document.authors = authors or []
+    document.dates = dates or []
+    document.people = people or []
+    document.organizations = organizations or []
+    document.source_url = source_url
+    return document
 
     def test_render_chunk_items_empty_state(self):
         html = render_chunk_items([])

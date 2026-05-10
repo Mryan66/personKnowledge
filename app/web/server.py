@@ -180,14 +180,16 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
 
     def _handle_search_get(self) -> None:
         settings = get_settings()
-        query = parse_qs(urlparse(self.path).query).get("q", [""])[0].strip()
-        mode = "auto"
+        request_query = parse_qs(urlparse(self.path).query)
+        query = request_query.get("q", [""])[0].strip()
+        mode = request_query.get("mode", ["auto"])[0]
         limit = 5
+        filters = extract_search_filters(request_query)
         results = []
         message = ""
         search_tool = SearchTool(settings.resolved_database_path, embedding_tool=build_embedding_tool(settings))
         if query:
-            results = search_tool.search(query, limit=limit, mode=mode)
+            results = search_tool.search(query, limit=limit, mode=mode, filters=filters)
             add_search_history(settings.resolved_database_path, query, mode, len(results))
             message = f"已搜索：{query}"
         search_history = list_search_history(settings.resolved_database_path)
@@ -198,6 +200,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 query=query,
                 mode=mode,
                 limit=limit,
+                filters=filters,
                 results=results,
                 search_history=search_history,
                 message=message,
@@ -209,12 +212,13 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         form = self._read_form()
         query = form.get("query", [""])[0].strip()
         mode = form.get("mode", ["auto"])[0]
+        filters = extract_search_filters(form)
         try:
             limit = max(1, min(20, int(form.get("limit", ["5"])[0])))
         except ValueError:
             limit = 5
         search_tool = SearchTool(settings.resolved_database_path, embedding_tool=build_embedding_tool(settings))
-        results = search_tool.search(query, limit=limit, mode=mode) if query else []
+        results = search_tool.search(query, limit=limit, mode=mode, filters=filters) if query else []
         if query:
             add_search_history(settings.resolved_database_path, query, mode, len(results))
         message = f"已搜索：{query}" if query else "请输入搜索内容。"
@@ -226,6 +230,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 query=query,
                 mode=mode,
                 limit=limit,
+                filters=filters,
                 results=results,
                 search_history=search_history,
                 message=message,
@@ -660,6 +665,16 @@ def parse_document_ids(form: dict) -> list[int]:
 
 def parse_tag_string(raw: str) -> list[str]:
     return [tag.strip() for tag in raw.split(",") if tag.strip()]
+
+
+def extract_search_filters(values: dict) -> dict:
+    return {
+        "category": values.get("category", [""])[0].strip(),
+        "tag": values.get("tag", [""])[0].strip(),
+        "person": values.get("person", [""])[0].strip(),
+        "date_from": values.get("date_from", [""])[0].strip(),
+        "date_to": values.get("date_to", [""])[0].strip(),
+    }
 
 
 def slugify_filename(text: str) -> str:

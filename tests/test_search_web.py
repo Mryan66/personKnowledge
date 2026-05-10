@@ -28,12 +28,13 @@ class SearchWebTests(unittest.TestCase):
             ingest_file(note, database_path)
             results = SearchTool(database_path).search("RAG")
 
-            html = render_results_panel(results, "RAG", message="done")
+            html = render_results_panel(results, "RAG", message="done", filters={"category": "rag"})
 
         self.assertIn("RAG 搜索", html)
         self.assertIn("keyword", html)
         self.assertIn("done", html)
         self.assertIn("#chunk-0", html)
+        self.assertIn("分类", html)
 
     def test_render_search_page_includes_form_options(self):
         with TemporaryDirectory() as temporary_directory:
@@ -41,18 +42,34 @@ class SearchWebTests(unittest.TestCase):
             template_path = root / "search.html"
             template_path.write_text(
                 "{{ app_name }} {{ query }} {{ limit }} {{ mode_options }} {{ mode_description }} "
-                "{{ openai_status }} {{ openai_status_class }} {{ result_count }} {{ results_panel }}",
+                "{{ openai_status }} {{ openai_status_class }} {{ result_count }} {{ category_filter }} {{ tag_filter }} "
+                "{{ person_filter }} {{ date_from_filter }} {{ date_to_filter }} {{ results_panel }}",
                 encoding="utf-8",
             )
             settings = Settings(workspace_dir=root)
 
-            html = render_search(settings, template_path, query="Agent", mode="vector", limit=3)
+            html = render_search(
+                settings,
+                template_path,
+                query="Agent",
+                mode="vector",
+                limit=3,
+                filters={
+                    "category": "agent",
+                    "tag": "rag",
+                    "person": "张三",
+                    "date_from": "2026-05-01",
+                    "date_to": "2026-05-31",
+                },
+            )
 
         self.assertIn("Personal AI Knowledge Butler", html)
         self.assertIn("Agent", html)
         self.assertIn("selected", html)
         self.assertIn("Vector", html)
         self.assertIn("未配置", html)
+        self.assertIn("agent", html)
+        self.assertIn("张三", html)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,10 @@ from tempfile import TemporaryDirectory
 
 from app.memory.database import (
     add_chat_message,
+    compute_file_hash,
     create_chat_session,
     delete_document,
+    find_document_by_hash,
     get_latest_assistant_message,
     get_document_by_id,
     get_chat_session,
@@ -14,6 +16,7 @@ from app.memory.database import (
     list_chat_messages,
     list_chat_sessions,
     list_chunks,
+    list_potential_duplicates,
     list_similar_documents,
     update_document_metadata,
     upsert_document,
@@ -41,9 +44,12 @@ class DatabaseTests(unittest.TestCase):
     def test_update_and_delete_document_metadata(self):
         with TemporaryDirectory() as temporary_directory:
             database_path = Path(temporary_directory) / "metadata.sqlite"
+            file_path = Path(temporary_directory) / "note.md"
+            file_path.write_text("hello", encoding="utf-8")
             document_id = upsert_document(
                 database_path,
-                source_path=Path(temporary_directory) / "note.md",
+                source_path=file_path,
+                file_hash=compute_file_hash(file_path),
                 title="原始标题",
                 summary="原始摘要",
                 tags=["one"],
@@ -68,6 +74,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(record.title, "更新标题")
         self.assertEqual(record.tags, ["agent", "rag"])
         self.assertEqual(record.category, "knowledge")
+        self.assertEqual(record.authors, [])
         self.assertEqual(len(chunks_before_delete), 1)
         self.assertTrue(deleted)
         self.assertIsNone(deleted_record)
@@ -79,6 +86,7 @@ class DatabaseTests(unittest.TestCase):
             target_id = upsert_document(
                 database_path,
                 source_path=root / "target.md",
+                file_hash="hash-target",
                 title="RAG 方案",
                 summary="关于 agent 与 memory 的总结",
                 tags=["rag", "agent", "memory"],
@@ -88,6 +96,7 @@ class DatabaseTests(unittest.TestCase):
             upsert_document(
                 database_path,
                 source_path=root / "close.md",
+                file_hash="hash-close",
                 title="Agent Memory 实践",
                 summary="RAG 与 memory 的组合",
                 tags=["rag", "memory"],
@@ -97,6 +106,7 @@ class DatabaseTests(unittest.TestCase):
             upsert_document(
                 database_path,
                 source_path=root / "far.md",
+                file_hash="hash-far",
                 title="旅游清单",
                 summary="周末出行准备",
                 tags=["travel"],
@@ -109,6 +119,44 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(similar), 1)
         self.assertEqual(similar[0]["title"], "Agent Memory 实践")
         self.assertGreater(similar[0]["similarity_score"], 0)
+
+    def test_find_document_by_hash_and_list_potential_duplicates(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            first = root / "first.md"
+            second = root / "second.md"
+            first.write_text("# Agent 方案\n\nRAG memory 设计。", encoding="utf-8")
+            second.write_text("# Agent 方案实践\n\nRAG memory 设计细节。", encoding="utf-8")
+
+            first_id = upsert_document(
+                database_path,
+                source_path=first,
+                file_hash=compute_file_hash(first),
+                title="Agent 方案",
+                summary="RAG memory 设计",
+                tags=["rag", "memory"],
+                category="ai",
+                chunks=["a"],
+            )
+            upsert_document(
+                database_path,
+                source_path=second,
+                file_hash=compute_file_hash(second),
+                title="Agent 方案实践",
+                summary="RAG memory 设计细节",
+                tags=["rag", "memory"],
+                category="ai",
+                chunks=["b"],
+            )
+
+            found = find_document_by_hash(database_path, compute_file_hash(first))
+            duplicates = list_potential_duplicates(database_path, first_id, limit=5)
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found.title, "Agent 方案")
+        self.assertEqual(len(duplicates), 1)
+        self.assertEqual(duplicates[0]["title"], "Agent 方案实践")
 
     def test_chat_sessions_and_messages_round_trip(self):
         with TemporaryDirectory() as temporary_directory:

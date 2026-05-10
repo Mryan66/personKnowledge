@@ -1,4 +1,5 @@
 from contextlib import closing
+import hashlib
 import json
 import re
 import sqlite3
@@ -12,10 +13,16 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_path TEXT NOT NULL UNIQUE,
+    file_hash TEXT,
     title TEXT,
     summary TEXT,
     tags TEXT,
     category TEXT,
+    authors TEXT,
+    dates TEXT,
+    people TEXT,
+    organizations TEXT,
+    source_url TEXT,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -72,10 +79,16 @@ CREATE TABLE IF NOT EXISTS search_history (
 class DocumentRecord:
     id: int
     source_path: str
+    file_hash: str
     title: str
     summary: str
     tags: List[str]
     category: str
+    authors: List[str]
+    dates: List[str]
+    people: List[str]
+    organizations: List[str]
+    source_url: str
     status: str
 
 
@@ -95,6 +108,11 @@ class SearchRecord:
     summary: str
     tags: List[str]
     category: str
+    authors: List[str]
+    dates: List[str]
+    people: List[str]
+    organizations: List[str]
+    source_url: str
     chunk_index: int
     content: str
     score: float
@@ -125,16 +143,23 @@ def initialize_database(database_path: Path) -> None:
         with connection:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.executescript(SCHEMA)
+    ensure_document_columns(database_path)
 
 
 def upsert_document(
     database_path: Path,
     source_path: Path,
+    file_hash: str,
     title: str,
     summary: str,
     tags: List[str],
     category: str,
     chunks: List[str],
+    authors: Optional[List[str]] = None,
+    dates: Optional[List[str]] = None,
+    people: Optional[List[str]] = None,
+    organizations: Optional[List[str]] = None,
+    source_url: str = "",
     status: str = "ingested",
 ) -> int:
     initialize_database(database_path)
@@ -143,17 +168,38 @@ def upsert_document(
             connection.execute("PRAGMA foreign_keys = ON")
             cursor = connection.execute(
                 """
-                INSERT INTO documents (source_path, title, summary, tags, category, status, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO documents (
+                    source_path, file_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(source_path) DO UPDATE SET
+                    file_hash = excluded.file_hash,
                     title = excluded.title,
                     summary = excluded.summary,
                     tags = excluded.tags,
                     category = excluded.category,
+                    authors = excluded.authors,
+                    dates = excluded.dates,
+                    people = excluded.people,
+                    organizations = excluded.organizations,
+                    source_url = excluded.source_url,
                     status = excluded.status,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (str(source_path), title, summary, json.dumps(tags, ensure_ascii=False), category, status),
+                (
+                    str(source_path),
+                    file_hash,
+                    title,
+                    summary,
+                    json.dumps(tags, ensure_ascii=False),
+                    category,
+                    json.dumps(authors or [], ensure_ascii=False),
+                    json.dumps(dates or [], ensure_ascii=False),
+                    json.dumps(people or [], ensure_ascii=False),
+                    json.dumps(organizations or [], ensure_ascii=False),
+                    source_url,
+                    status,
+                ),
             )
             if cursor.lastrowid:
                 document_id = cursor.lastrowid
@@ -180,7 +226,7 @@ def get_document(database_path: Path, source_path: Path) -> Optional[DocumentRec
     with closing(sqlite3.connect(database_path)) as connection:
         row = connection.execute(
             """
-            SELECT id, source_path, title, summary, tags, category, status
+            SELECT id, source_path, file_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status
             FROM documents
             WHERE source_path = ?
             """,
@@ -196,7 +242,7 @@ def get_document_by_id(database_path: Path, document_id: int) -> Optional[Docume
     with closing(sqlite3.connect(database_path)) as connection:
         row = connection.execute(
             """
-            SELECT id, source_path, title, summary, tags, category, status
+            SELECT id, source_path, file_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status
             FROM documents
             WHERE id = ?
             """,
@@ -302,10 +348,16 @@ def search_documents(database_path: Path, query: str, limit: int = 5) -> List[Se
             SELECT
                 d.id,
                 d.source_path,
+                d.file_hash,
                 d.title,
                 d.summary,
                 d.tags,
                 d.category,
+                d.authors,
+                d.dates,
+                d.people,
+                d.organizations,
+                d.source_url,
                 c.chunk_index,
                 c.content,
                 (
@@ -341,7 +393,28 @@ def search_documents(database_path: Path, query: str, limit: int = 5) -> List[Se
             ),
         ).fetchall()
 
-    return [_search_from_row(row, score=row[8]) for row in rows]
+    return [_search_from_row(row, score=row[14]) for row in rows]
+
+
+def search_documents_advanced(
+    database_path: Path,
+    query: str,
+    limit: int = 5,
+    category: str = "",
+    tag: str = "",
+    person: str = "",
+    date_from: str = "",
+    date_to: str = "",
+) -> List[SearchRecord]:
+    records = search_documents(database_path, query, limit=max(limit * 5, 50))
+    return apply_search_filters(
+        records,
+        category=category,
+        tag=tag,
+        person=person,
+        date_from=date_from,
+        date_to=date_to,
+    )[:limit]
 
 
 def search_embeddings(database_path: Path, query_embedding: List[float], limit: int = 5) -> List[SearchRecord]:
@@ -355,10 +428,16 @@ def search_embeddings(database_path: Path, query_embedding: List[float], limit: 
             SELECT
                 d.id,
                 d.source_path,
+                d.file_hash,
                 d.title,
                 d.summary,
                 d.tags,
                 d.category,
+                d.authors,
+                d.dates,
+                d.people,
+                d.organizations,
+                d.source_url,
                 c.chunk_index,
                 c.content,
                 e.vector
@@ -371,7 +450,7 @@ def search_embeddings(database_path: Path, query_embedding: List[float], limit: 
     scored_records = []
     for row in rows:
         try:
-            vector = json.loads(row[8] or "[]")
+            vector = json.loads(row[14] or "[]")
         except json.JSONDecodeError:
             continue
         score = cosine_similarity(query_embedding, vector)
@@ -380,12 +459,75 @@ def search_embeddings(database_path: Path, query_embedding: List[float], limit: 
     return sorted(scored_records, key=lambda record: record.score, reverse=True)[:limit]
 
 
+def apply_search_filters(
+    records: List[SearchRecord],
+    category: str = "",
+    tag: str = "",
+    person: str = "",
+    date_from: str = "",
+    date_to: str = "",
+) -> List[SearchRecord]:
+    normalized_category = category.strip().lower()
+    normalized_tag = tag.strip().lower()
+    normalized_person = person.strip().lower()
+    filtered = []
+    for record in records:
+        if normalized_category and normalized_category not in (record.category or "").lower():
+            continue
+        if normalized_tag and not any(normalized_tag in item.lower() for item in record.tags):
+            continue
+        if normalized_person:
+            people_values = [item.lower() for item in (record.people or [])]
+            if not any(normalized_person in item for item in people_values):
+                continue
+        if date_from or date_to:
+            if not matches_date_range(record.dates, date_from=date_from, date_to=date_to):
+                continue
+        filtered.append(record)
+    return filtered
+
+
+def matches_date_range(dates: List[str], date_from: str = "", date_to: str = "") -> bool:
+    if not dates:
+        return False
+    normalized_dates = sorted(normalize_date_value(item) for item in dates if normalize_date_value(item))
+    if not normalized_dates:
+        return False
+    start = normalize_date_value(date_from)
+    end = normalize_date_value(date_to)
+    for value in normalized_dates:
+        if start and value < start:
+            continue
+        if end and value > end:
+            continue
+        return True
+    return False
+
+
+def normalize_date_value(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    normalized = (
+        value.replace("年", "-")
+        .replace("月", "-")
+        .replace("日", "")
+        .replace("/", "-")
+        .replace(".", "-")
+    )
+    parts = [part for part in normalized.split("-") if part]
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return ""
+    year, month, day = parts
+    return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+
 def list_documents(database_path: Path, limit: int = 20) -> List[DocumentRecord]:
     initialize_database(database_path)
     with closing(sqlite3.connect(database_path)) as connection:
         rows = connection.execute(
             """
-            SELECT id, source_path, title, summary, tags, category, status
+            SELECT id, source_path, file_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status
             FROM documents
             ORDER BY updated_at DESC, id DESC
             LIMIT ?
@@ -562,11 +704,17 @@ def _document_from_row(row) -> DocumentRecord:
     return DocumentRecord(
         id=row[0],
         source_path=row[1],
-        title=row[2] or "",
-        summary=row[3] or "",
-        tags=json.loads(row[4] or "[]"),
-        category=row[5] or "",
-        status=row[6] or "",
+        file_hash=row[2] or "",
+        title=row[3] or "",
+        summary=row[4] or "",
+        tags=json.loads(row[5] or "[]"),
+        category=row[6] or "",
+        authors=json.loads(row[7] or "[]"),
+        dates=json.loads(row[8] or "[]"),
+        people=json.loads(row[9] or "[]"),
+        organizations=json.loads(row[10] or "[]"),
+        source_url=row[11] or "",
+        status=row[12] or "",
     )
 
 
@@ -574,12 +722,17 @@ def _search_from_row(row, score: float) -> SearchRecord:
     return SearchRecord(
         document_id=row[0],
         source_path=row[1],
-        title=row[2] or "",
-        summary=row[3] or "",
-        tags=json.loads(row[4] or "[]"),
-        category=row[5] or "",
-        chunk_index=row[6],
-        content=row[7] or "",
+        title=row[3] or "",
+        summary=row[4] or "",
+        tags=json.loads(row[5] or "[]"),
+        category=row[6] or "",
+        authors=json.loads(row[7] or "[]"),
+        dates=json.loads(row[8] or "[]"),
+        people=json.loads(row[9] or "[]"),
+        organizations=json.loads(row[10] or "[]"),
+        source_url=row[11] or "",
+        chunk_index=row[12],
+        content=row[13] or "",
         score=float(score or 0),
     )
 
@@ -593,7 +746,7 @@ def get_dashboard_stats(database_path: Path, recent_limit: int = 5) -> dict:
         tag_rows = connection.execute("SELECT tags FROM documents").fetchall()
         recent_rows = connection.execute(
             """
-            SELECT id, source_path, title, summary, tags, category, status
+            SELECT id, source_path, file_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status
             FROM documents
             ORDER BY updated_at DESC, id DESC
             LIMIT ?
@@ -625,10 +778,16 @@ def list_document_overviews(database_path: Path, limit: int = 100) -> List[dict]
             SELECT
                 d.id,
                 d.source_path,
+                d.file_hash,
                 d.title,
                 d.summary,
                 d.tags,
                 d.category,
+                d.authors,
+                d.dates,
+                d.people,
+                d.organizations,
+                d.source_url,
                 d.status,
                 d.updated_at,
                 COUNT(DISTINCT c.id) AS chunk_count,
@@ -647,14 +806,20 @@ def list_document_overviews(database_path: Path, limit: int = 100) -> List[dict]
         {
             "id": row[0],
             "source_path": row[1],
-            "title": row[2] or "",
-            "summary": row[3] or "",
-            "tags": json.loads(row[4] or "[]"),
-            "category": row[5] or "",
-            "status": row[6] or "",
-            "updated_at": row[7] or "",
-            "chunk_count": row[8],
-            "embedding_count": row[9],
+            "file_hash": row[2] or "",
+            "title": row[3] or "",
+            "summary": row[4] or "",
+            "tags": json.loads(row[5] or "[]"),
+            "category": row[6] or "",
+            "authors": json.loads(row[7] or "[]"),
+            "dates": json.loads(row[8] or "[]"),
+            "people": json.loads(row[9] or "[]"),
+            "organizations": json.loads(row[10] or "[]"),
+            "source_url": row[11] or "",
+            "status": row[12] or "",
+            "updated_at": row[13] or "",
+            "chunk_count": row[14],
+            "embedding_count": row[15],
         }
         for row in rows
     ]
@@ -701,6 +866,77 @@ def extract_similarity_tokens(text: str) -> set[str]:
         for token in json.loads(json.dumps(re.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}|[\u4e00-\u9fff]{2,}", text.lower())))
         if token
     }
+
+
+def ensure_document_columns(database_path: Path) -> None:
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute("PRAGMA table_info(documents)").fetchall()
+        column_names = {row[1] for row in rows}
+        additions = {
+            "file_hash": "TEXT",
+            "authors": "TEXT",
+            "dates": "TEXT",
+            "people": "TEXT",
+            "organizations": "TEXT",
+            "source_url": "TEXT",
+        }
+        with connection:
+            for column_name, column_type in additions.items():
+                if column_name in column_names:
+                    continue
+                connection.execute(f"ALTER TABLE documents ADD COLUMN {column_name} {column_type}")
+                column_names.add(column_name)
+
+
+def compute_file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def find_document_by_hash(database_path: Path, file_hash: str) -> Optional[DocumentRecord]:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        row = connection.execute(
+            """
+            SELECT id, source_path, file_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status
+            FROM documents
+            WHERE file_hash = ?
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (file_hash,),
+        ).fetchone()
+    if row is None:
+        return None
+    return _document_from_row(row)
+
+
+def list_potential_duplicates(database_path: Path, document_id: int, limit: int = 5) -> List[dict]:
+    target = get_document_by_id(database_path, document_id)
+    if target is None:
+        return []
+    documents = list_document_overviews(database_path, limit=500)
+    scored = []
+    target_title_tokens = extract_similarity_tokens(target.title)
+    target_tokens = extract_similarity_tokens(f"{target.title} {target.summary}")
+    for document in documents:
+        if document["id"] == document_id:
+            continue
+        similarity = similarity_score(target, document)
+        candidate_title_tokens = extract_similarity_tokens(document.get("title", ""))
+        candidate_tokens = extract_similarity_tokens(f"{document.get('title', '')} {document.get('summary', '')}")
+        title_overlap = len(target_title_tokens & candidate_title_tokens)
+        token_overlap = len(target_tokens & candidate_tokens)
+        if similarity >= 8 or title_overlap >= 2 or token_overlap >= 4:
+            enriched = dict(document)
+            enriched["similarity_score"] = similarity
+            enriched["duplicate_signal"] = min(100, similarity * 10 + token_overlap * 5 + title_overlap * 10)
+            scored.append(enriched)
+    scored.sort(key=lambda item: (-item["duplicate_signal"], -item["similarity_score"], item["title"], item["id"]))
+    return scored[:limit]
 
 
 def get_document_growth_stats(database_path: Path, days: int = 30) -> List[dict]:

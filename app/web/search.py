@@ -18,24 +18,31 @@ def render_search(
     query: str = "",
     mode: str = "auto",
     limit: int = 5,
+    filters: dict = None,
     results: List[SearchResult] = None,
     search_history: List[dict] = None,
     message: str = "",
 ) -> str:
     results = results or []
     search_history = search_history or []
+    filters = filters or {}
     normalized_mode = mode if mode in SEARCH_MODES else "auto"
     template = template_path.read_text(encoding="utf-8")
     replacements = {
         "app_name": settings.app_name,
         "query": escape(query),
         "limit": str(limit),
+        "category_filter": escape(filters.get("category", "")),
+        "tag_filter": escape(filters.get("tag", "")),
+        "person_filter": escape(filters.get("person", "")),
+        "date_from_filter": escape(filters.get("date_from", "")),
+        "date_to_filter": escape(filters.get("date_to", "")),
         "mode_options": render_mode_options(normalized_mode),
         "mode_description": SEARCH_MODES[normalized_mode],
         "openai_status": "已配置" if settings.openai_api_key else "未配置",
         "openai_status_class": "status-ok" if settings.openai_api_key else "status-warn",
         "result_count": str(len(results)),
-        "results_panel": render_results_panel(results, query, message),
+        "results_panel": render_results_panel(results, query, message, filters=filters),
         "search_history_panel": render_search_history_panel(search_history),
     }
     for key, value in replacements.items():
@@ -51,13 +58,17 @@ def render_mode_options(selected_mode: str) -> str:
     return "\n".join(options)
 
 
-def render_results_panel(results: List[SearchResult], query: str, message: str = "") -> str:
+def render_results_panel(results: List[SearchResult], query: str, message: str = "", filters: dict = None) -> str:
+    filters = filters or {}
     if not query and not message:
         return ""
 
     parts = ['<section class="panel result-panel">', '<div class="panel-heading"><h2>搜索结果</h2><p>展示匹配的知识库 chunk。</p></div>']
     if message:
         parts.append(f'<p class="notice">{escape(message)}</p>')
+    active_filters = render_active_filters(filters)
+    if active_filters:
+        parts.append(active_filters)
     if query and not results:
         parts.append(f'<p class="muted">没有找到与 “{escape(query)}” 相关的结果。</p>')
     if results:
@@ -85,6 +96,24 @@ def render_results_panel(results: List[SearchResult], query: str, message: str =
         parts.append("</div>")
     parts.append("</section>")
     return "\n".join(parts)
+
+
+def render_active_filters(filters: dict) -> str:
+    items = []
+    labels = {
+        "category": "分类",
+        "tag": "标签",
+        "person": "人物",
+        "date_from": "开始日期",
+        "date_to": "结束日期",
+    }
+    for key, label in labels.items():
+        value = (filters.get(key) or "").strip()
+        if value:
+            items.append(f'<span class="filter-chip">{escape(label)}: <strong>{escape(value)}</strong></span>')
+    if not items:
+        return ""
+    return '<div class="chip-row">' + " ".join(items) + "</div>"
 
 
 def render_search_history_panel(history: List[dict]) -> str:

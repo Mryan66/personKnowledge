@@ -68,7 +68,7 @@ class IngestPipelineTests(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             (root / "note.md").write_text("# Note", encoding="utf-8")
-            (root / "image.png").write_text("Nope", encoding="utf-8")
+            (root / "archive.bin").write_text("Nope", encoding="utf-8")
             database_path = root / "metadata.sqlite"
 
             batch = ingest_path(root, database_path)
@@ -76,6 +76,50 @@ class IngestPipelineTests(unittest.TestCase):
         self.assertEqual(len(batch), 1)
         self.assertEqual(batch[0].title, "Note")
         self.assertEqual(batch.failures, [])
+
+    def test_ingest_path_reports_image_ocr_failure_when_disabled(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "image.png").write_bytes(b"fake-image")
+            database_path = root / "metadata.sqlite"
+
+            batch = ingest_path(root, database_path, enable_ocr=False)
+
+        self.assertEqual(batch.successes, [])
+        self.assertEqual(len(batch.failures), 1)
+        self.assertIn("Image OCR is disabled", batch.failures[0].reason)
+
+    def test_ingest_file_marks_duplicate_when_same_hash_exists(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            original = root / "original.md"
+            duplicate = root / "duplicate.md"
+            content = "# Agent 知识\n\n同一份内容。"
+            original.write_text(content, encoding="utf-8")
+            duplicate.write_text(content, encoding="utf-8")
+
+            first = ingest_file(original, database_path)
+            second = ingest_file(duplicate, database_path)
+
+        self.assertEqual(first.status, "ingested")
+        self.assertEqual(second.status, "duplicate")
+        self.assertEqual(second.duplicate_of_document_id, first.document_id)
+
+    def test_ingest_file_marks_similar_when_candidate_exists(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            first = root / "first.md"
+            second = root / "second.md"
+            first.write_text("# Agent 方案\n\nRAG memory 设计。", encoding="utf-8")
+            second.write_text("# Agent 方案实践\n\nRAG memory 设计细节。", encoding="utf-8")
+
+            ingest_file(first, database_path)
+            result = ingest_file(second, database_path)
+
+        self.assertEqual(result.status, "similar")
+        self.assertGreaterEqual(len(result.duplicate_candidates), 1)
 
     def test_ingest_path_reports_empty_document_failure(self):
         with TemporaryDirectory() as temporary_directory:

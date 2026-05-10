@@ -62,7 +62,7 @@ def render_document_rows(documents: list) -> str:
             f'<td>{escape(summary)}</td>'
             f'<td>{document["chunk_count"]}</td>'
             f'<td>{embedding_status}</td>'
-            f'<td>{escape(document["status"] or "-")}</td>'
+            f'<td>{render_document_status(document)}</td>'
             f'<td>{escape(document["updated_at"] or "-")}</td>'
             "</tr>"
         )
@@ -83,6 +83,17 @@ def render_embedding_status(chunk_count: int, embedding_count: int) -> str:
     if embedding_count == 0:
         return f'<span class="status-warn">0/{chunk_count}</span>'
     return f'<span class="status-warn">{embedding_count}/{chunk_count}</span>'
+
+
+def render_document_status(document: dict) -> str:
+    status = (document.get("status") or "-").strip()
+    if status == "duplicate":
+        return '<span class="status-warn">duplicate</span>'
+    if status == "similar":
+        return '<span class="status-warn">similar</span>'
+    if status == "ingested":
+        return '<span class="status-ok">ingested</span>'
+    return escape(status or "-")
 
 
 def render_category_filters(documents: list) -> str:
@@ -151,6 +162,7 @@ def render_document_detail_panel(
         <div><dt>Chunk 数</dt><dd>{len(chunks)}</dd></div>
         <div><dt>状态</dt><dd>{escape(document.status or "-")}</dd></div>
       </dl>
+      {render_metadata_facts(document)}
     </div>
     <div class="detail-card">
       <h3>编辑元数据</h3>
@@ -228,6 +240,28 @@ def render_similar_documents(documents: list[dict]) -> str:
             '</article>'
         )
     return "\n".join(items)
+
+
+def render_metadata_facts(document: DocumentRecord) -> str:
+    rows = []
+    rows.append(render_metadata_row("作者", document.authors))
+    rows.append(render_metadata_row("日期", document.dates))
+    rows.append(render_metadata_row("人物", document.people))
+    rows.append(render_metadata_row("组织", document.organizations))
+    if document.source_url:
+        rows.append(
+            f'<div><dt>来源链接</dt><dd><a class="table-link" href="{escape(document.source_url)}">{escape(document.source_url)}</a></dd></div>'
+        )
+    rendered_rows = "".join(row for row in rows if row)
+    if not rendered_rows:
+        return ""
+    return f'<dl class="status-list">{rendered_rows}</dl>'
+
+
+def render_metadata_row(label: str, values: list[str]) -> str:
+    if not values:
+        return ""
+    return f"<div><dt>{escape(label)}</dt><dd>{escape(', '.join(values))}</dd></div>"
 
 
 def render_document_preview(source_path: Path, content: str) -> str:

@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set
 
-from app.memory.database import SearchRecord, search_documents, search_embeddings
+from app.memory.database import SearchRecord, apply_search_filters, search_documents, search_documents_advanced, search_embeddings
 from app.tools.embedding_tool import EmbeddingTool
 from app.tools.openai_client import OpenAIClientError
 
@@ -25,15 +25,23 @@ class SearchTool:
         self.database_path = database_path
         self.embedding_tool = embedding_tool
 
-    def search(self, query: str, limit: int = 5, mode: str = "auto") -> List[SearchResult]:
+    def search(
+        self,
+        query: str,
+        limit: int = 5,
+        mode: str = "auto",
+        filters: Optional[Dict[str, str]] = None,
+    ) -> List[SearchResult]:
+        filters = filters or {}
         if mode == "keyword":
-            records = search_documents(self.database_path, query, limit=limit)
+            records = search_documents_advanced(self.database_path, query, limit=limit, **self._normalize_filters(filters))
             return [self._map_record(record, mode="keyword") for record in records]
 
         if mode == "vector" and self.embedding_tool:
             try:
                 query_embedding = self.embedding_tool.embed_texts([query])[0]
-                vector_records = search_embeddings(self.database_path, query_embedding, limit=limit)
+                vector_records = search_embeddings(self.database_path, query_embedding, limit=max(limit * 5, 50))
+                vector_records = apply_search_filters(vector_records, **self._normalize_filters(filters))[:limit]
                 return [self._map_record(record, mode="vector") for record in vector_records]
             except (OpenAIClientError, IndexError, ValueError):
                 return []
@@ -44,7 +52,12 @@ class SearchTool:
 
         # Get keyword results
         try:
-            keyword_records = search_documents(self.database_path, query, limit=limit * 2)
+            keyword_records = search_documents_advanced(
+                self.database_path,
+                query,
+                limit=max(limit * 2, 20),
+                **self._normalize_filters(filters),
+            )
         except Exception:
             pass
 
@@ -52,7 +65,8 @@ class SearchTool:
         if self.embedding_tool:
             try:
                 query_embedding = self.embedding_tool.embed_texts([query])[0]
-                vector_records = search_embeddings(self.database_path, query_embedding, limit=limit * 2)
+                vector_records = search_embeddings(self.database_path, query_embedding, limit=max(limit * 5, 50))
+                vector_records = apply_search_filters(vector_records, **self._normalize_filters(filters))[: max(limit * 2, 20)]
             except (OpenAIClientError, IndexError, ValueError):
                 pass
 
@@ -121,6 +135,15 @@ class SearchTool:
             results.append(self._map_record(record, mode=mode, override_score=score))
 
         return results
+
+    def _normalize_filters(self, filters: Dict[str, str]) -> Dict[str, str]:
+        return {
+            "category": (filters.get("category") or "").strip(),
+            "tag": (filters.get("tag") or "").strip(),
+            "person": (filters.get("person") or "").strip(),
+            "date_from": (filters.get("date_from") or "").strip(),
+            "date_to": (filters.get("date_to") or "").strip(),
+        }
 
     def _map_record(self, record, mode: str, override_score: Optional[float] = None) -> SearchResult:
         return SearchResult(

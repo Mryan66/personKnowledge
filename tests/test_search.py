@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from app.ingest.pipeline import ingest_file
-from app.memory.database import search_documents
+from app.memory.database import search_documents, search_documents_advanced
 from app.tools.search_tool import SearchTool
 
 
@@ -62,6 +62,55 @@ class SearchTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].title, "个人知识库")
         self.assertEqual(results[0].chunk_index, 0)
+
+    def test_search_documents_advanced_filters_by_category_tag_person_and_date(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            first = root / "first.md"
+            second = root / "second.md"
+            first.write_text(
+                "# 项目复盘\n\n作者：张三\n日期：2026-05-10\n人物：李四\n标签：rag\n这是一个 Agent 项目复盘。",
+                encoding="utf-8",
+            )
+            second.write_text(
+                "# 生活记录\n\n作者：王五\n日期：2026-04-01\n人物：赵六\n这是生活类笔记。",
+                encoding="utf-8",
+            )
+            ingest_file(first, database_path)
+            ingest_file(second, database_path)
+
+            results = search_documents_advanced(
+                database_path,
+                "项目",
+                category="项目复盘",
+                person="李四",
+                date_from="2026-05-01",
+                date_to="2026-05-31",
+                limit=5,
+            )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].title, "项目复盘")
+
+    def test_search_tool_applies_filters_in_auto_mode(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            first = root / "first.md"
+            second = root / "second.md"
+            first.write_text("# Agent 项目\n\n日期：2026-05-10\n人物：李四\nAgent 规划。", encoding="utf-8")
+            second.write_text("# Agent 生活\n\n日期：2026-04-01\n人物：王五\nAgent 随想。", encoding="utf-8")
+            ingest_file(first, database_path)
+            ingest_file(second, database_path)
+
+            results = SearchTool(database_path).search(
+                "Agent",
+                filters={"person": "李四", "date_from": "2026-05-01", "date_to": "2026-05-31"},
+            )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].title, "Agent 项目")
 
 
 if __name__ == "__main__":

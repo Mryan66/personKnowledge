@@ -1,6 +1,6 @@
 from pathlib import Path
 
-SUPPORTED_EXTENSIONS = {".md", ".txt", ".pdf"}
+SUPPORTED_EXTENSIONS = {".md", ".txt", ".pdf", ".docx", ".html", ".htm", ".png", ".jpg", ".jpeg"}
 
 
 def scan_inbox(inbox_dir: Path) -> list[Path]:

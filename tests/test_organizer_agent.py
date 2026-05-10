@@ -3,6 +3,11 @@ from pathlib import Path
 
 from app.agents.organizer_agent import (
     OrganizerAgent,
+    extract_authors,
+    extract_dates,
+    extract_organizations,
+    extract_people,
+    extract_source_url,
     normalize_action_items,
     normalize_category,
     normalize_tags,
@@ -106,6 +111,35 @@ class OrganizerAgentTests(unittest.TestCase):
         result = agent.organize(Path("note.md"), "# 原始标题\n\n待办：补充案例，下一步更新知识卡片。")
 
         self.assertIn("llm_action_items_empty", result.diagnostics.warnings)
+
+    def test_rule_extractors_capture_structured_metadata(self):
+        content = (
+            "作者：张三\n"
+            "日期：2026-05-10\n"
+            "人物：李四，王五\n"
+            "公司：OpenAI，Microsoft\n"
+            "链接：https://example.com/report\n"
+        )
+
+        self.assertEqual(extract_authors(content), ["张三"])
+        self.assertEqual(extract_dates(content), ["2026-05-10"])
+        self.assertEqual(extract_people(content), ["李四", "王五"])
+        self.assertIn("OpenAI", extract_organizations(content))
+        self.assertEqual(extract_source_url(content), "https://example.com/report")
+
+    def test_organize_with_rules_includes_structured_metadata(self):
+        agent = OrganizerAgent()
+
+        result = agent.organize(
+            Path("note.md"),
+            "# 项目纪要\n\n作者：张三\n日期：2026-05-10\n人物：李四\n公司：OpenAI\n链接：https://example.com\n",
+        )
+
+        self.assertEqual(result.authors, ["张三"])
+        self.assertEqual(result.dates, ["2026-05-10"])
+        self.assertEqual(result.people, ["李四"])
+        self.assertIn("OpenAI", result.organizations)
+        self.assertEqual(result.source_url, "https://example.com")
 
 
 if __name__ == "__main__":

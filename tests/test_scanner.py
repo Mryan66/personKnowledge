@@ -12,11 +12,12 @@ class ScannerTests(unittest.TestCase):
             inbox_dir = Path(temporary_directory)
             (inbox_dir / "note.md").write_text("hello", encoding="utf-8")
             (inbox_dir / "raw.txt").write_text("hello", encoding="utf-8")
-            (inbox_dir / "image.png").write_text("nope", encoding="utf-8")
+            (inbox_dir / "page.html").write_text("<p>hello</p>", encoding="utf-8")
+            (inbox_dir / "image.png").write_bytes(b"nope")
 
             files = scan_inbox(inbox_dir)
 
-        self.assertEqual([file.name for file in files], ["note.md", "raw.txt"])
+        self.assertEqual([file.name for file in files], ["image.png", "note.md", "page.html", "raw.txt"])
 
     def test_scan_inbox_missing_directory(self):
         from tempfile import TemporaryDirectory

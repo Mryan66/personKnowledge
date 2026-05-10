@@ -52,6 +52,26 @@
           数量
           <input type="number" name="limit" value="{{ limit }}" min="1" max="20">
         </label>
+        <label>
+          分类
+          <input type="text" name="category" value="{{ category_filter }}" placeholder="如 agent / project">
+        </label>
+        <label>
+          标签
+          <input type="text" name="tag" value="{{ tag_filter }}" placeholder="如 rag / memory">
+        </label>
+        <label>
+          人物
+          <input type="text" name="person" value="{{ person_filter }}" placeholder="如 张三 / Alice">
+        </label>
+        <label>
+          开始日期
+          <input type="date" name="date_from" value="{{ date_from_filter }}">
+        </label>
+        <label>
+          结束日期
+          <input type="date" name="date_to" value="{{ date_to_filter }}">
+        </label>
         <button type="submit">搜索</button>
       </form>
     </section>
