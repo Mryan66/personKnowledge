@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Knowledge 知识库 - {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">AI 知识管家</div>
+    <nav>
+      <a href="/dashboard">Dashboard</a>
+      <a href="/inbox">Inbox 导入</a>
+      <a class="active" href="/knowledge">Knowledge 知识库</a>
+      <a href="/search">Search 搜索</a>
+      <a href="/ask">Ask AI</a>
+      <a href="/review">Review 复盘</a>
+      <a href="/settings">Settings 设置</a>
+    </nav>
+  </aside>
+
+  <main class="page">
+    <header class="hero compact-hero">
+      <div>
+        <p class="eyebrow">Knowledge</p>
+        <h1>知识库</h1>
+        <p>浏览已入库文档、摘要、标签、分类和 chunk/embedding 状态。</p>
+      </div>
+      <div class="status-panel">
+        <div><span>文档</span><strong>{{ document_count }}</strong></div>
+        <div><span>Chunk</span><strong>{{ chunk_count }}</strong></div>
+        <div><span>Embedding</span><strong>{{ embedding_count }}</strong></div>
+        <div><span>标签</span><strong>{{ tag_count }}</strong></div>
+      </div>
+    </header>
+
+    {{ message_panel }}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>快速过滤</h2>
+        <p>通过关键词快速筛选文档。</p>
+      </div>
+      <form class="search-form">
+        <label>
+          关键词过滤
+          <input type="text" id="knowledge-filter" placeholder="搜索标题、摘要、标签或分类...">
+        </label>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>分类概览</h2>
+        <p>按当前文档元数据聚合。</p>
+      </div>
+      <div class="chip-row">{{ category_filters }}</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>标签云</h2>
+        <p>展示出现频率最高的标签。</p>
+      </div>
+      <div class="chip-row">{{ tag_cloud }}</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>文档列表</h2>
+        <p>最多展示最近 {{ limit }} 篇文档，支持批量删除和重新导入。</p>
+      </div>
+      <form method="post" action="/knowledge/batch-delete">
+        <div class="form-actions batch-actions">
+          <button type="submit">批量删除</button>
+          <button type="submit" formaction="/knowledge/batch-reingest">批量重新导入</button>
+        </div>
+      <div class="table-wrap">
+        <table class="data-table knowledge-table">
+          <thead>
+            <tr>
+              <th>选择</th>
+              <th>文档</th>
+              <th>分类</th>
+              <th>标签</th>
+              <th>摘要</th>
+              <th>Chunk</th>
+              <th>Embedding</th>
+              <th>状态</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ document_rows }}
+          </tbody>
+        </table>
+      </div>
+      </form>
+    </section>
+
+    {{ document_detail_panel }}
+  </main>
+
+<script>
+(function() {
+  const filterInput = document.getElementById('knowledge-filter');
+  if (!filterInput) return;
+
+  const table = filterInput.closest('.page').querySelector('.data-table');
+  const rows = table ? Array.from(table.querySelectorAll('tbody tr')) : [];
+  const emptyRow = '<tr><td colspan="9" class="muted center">无匹配的文档。</td></tr>';
+
+  filterInput.addEventListener('input', function() {
+    const term = this.value.trim().toLowerCase();
+    let visible = 0;
+
+    rows.forEach(function(row) {
+      const text = row.textContent.toLowerCase();
+      const match = !term || text.includes(term);
+      row.style.display = match ? '' : 'none';
+      if (match) visible++;
+    });
+
+    const tbody = table.querySelector('tbody');
+    if (tbody) {
+      const existingEmpty = tbody.querySelector('.empty-message-row');
+      if (visible === 0) {
+        if (!existingEmpty) {
+          const tr = document.createElement('tr');
+          tr.className = 'empty-message-row';
+          tr.innerHTML = '<td colspan="9" class="muted center">无匹配的文档。</td>';
+          tbody.appendChild(tr);
+        }
+      } else {
+        if (existingEmpty) existingEmpty.remove();
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>

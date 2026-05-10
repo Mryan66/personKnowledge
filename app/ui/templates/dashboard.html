@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ app_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">AI 知识管家</div>
+    <nav>
+      <a class="active" href="/dashboard">Dashboard</a>
+      <a href="/inbox">Inbox 导入</a>
+      <a href="/knowledge">Knowledge 知识库</a>
+      <a href="/search">Search 搜索</a>
+      <a href="/ask">Ask AI</a>
+      <a href="/review">Review 复盘</a>
+      <a href="/settings">Settings 设置</a>
+    </nav>
+  </aside>
+
+  <main class="page">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Personal AI Knowledge Butler</p>
+        <h1>{{ app_name }}</h1>
+        <p>本地优先的个人知识整理、搜索、问答和复盘系统。</p>
+      </div>
+      <div class="status-panel">
+        <div><span>OpenAI</span><strong class="{{ openai_status_class }}">{{ openai_status }}</strong></div>
+        <div><span>检索模式</span><strong>{{ search_status }}</strong></div>
+        <div><span>最近 Review</span><strong>{{ recent_review }}</strong></div>
+      </div>
+    </header>
+
+    <section class="stats-grid" aria-label="知识库总体状态">
+      <article><span>文档</span><strong>{{ document_count }}</strong></article>
+      <article><span>Chunk</span><strong>{{ chunk_count }}</strong></article>
+      <article><span>向量</span><strong>{{ embedding_count }}</strong></article>
+      <article><span>标签</span><strong>{{ tag_count }}</strong></article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>快捷操作</h2>
+        <p>快速导航到常用功能。</p>
+      </div>
+      <div class="actions">
+        <a href="/inbox">导入文件</a>
+        <a href="/search">打开搜索</a>
+        <a href="/ask">向 AI 提问</a>
+        <a href="/review">生成复盘</a>
+        <a href="/settings">查看设置</a>
+      </div>
+    </section>
+
+    {{ growth_panel }}
+
+    <section class="content-grid">
+      <article class="panel">
+        <div class="panel-heading">
+          <h2>最近导入</h2>
+          <p>展示最近更新的知识库文档。</p>
+        </div>
+        <ul class="recent-list">
+          {{ recent_documents }}
+        </ul>
+      </article>
+
+      <article class="panel">
+        <div class="panel-heading">
+          <h2>当前状态</h2>
+          <p>用于确认系统是否具备 RAG 和向量检索能力。</p>
+        </div>
+        <dl class="status-list">
+          <div><dt>OpenAI API</dt><dd class="{{ openai_status_class }}">{{ openai_status }}</dd></div>
+          <div><dt>默认搜索</dt><dd>{{ search_status }}</dd></div>
+          <div><dt>Embedding</dt><dd>已入库向量：{{ embedding_count }}</dd></div>
+          <div><dt>Review</dt><dd>{{ recent_review }}</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>未来功能</h2>
+        <p>以下模块规划中。</p>
+      </div>
+      <div class="placeholder-grid">
+        {{ placeholder_cards }}
+      </div>
+    </section>
+  </main>
+</body>
+</html>

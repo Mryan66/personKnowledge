@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ask AI 问答 - {{ app_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">AI 知识管家</div>
+    <nav>
+      <a href="/dashboard">Dashboard</a>
+      <a href="/inbox">Inbox 导入</a>
+      <a href="/knowledge">Knowledge 知识库</a>
+      <a href="/search">Search 搜索</a>
+      <a class="active" href="/ask">Ask AI</a>
+      <a href="/review">Review 复盘</a>
+      <a href="/settings">Settings 设置</a>
+    </nav>
+  </aside>
+
+  <main class="page">
+    <header class="hero compact-hero">
+      <div>
+        <p class="eyebrow">Ask AI</p>
+        <h1>向知识库提问</h1>
+        <p>基于已导入文档检索来源，并在可用时调用 OpenAI 生成 RAG 总结回答。</p>
+      </div>
+      <div class="status-panel">
+        <div><span>OpenAI</span><strong class="{{ openai_status_class }}">{{ openai_status }}</strong></div>
+        <div><span>回答模式</span><strong>{{ answer_mode }}</strong></div>
+        <div><span>置信度</span><strong>{{ answer_confidence }}</strong></div>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>快速提示</h2>
+        <p>点击快速填充问题。</p>
+      </div>
+      <div class="chip-row" id="quick-prompts">
+        <span class="tag-chip" data-prompt="总结最近的知识">总结最近的知识</span>
+        <span class="tag-chip" data-prompt="有哪些关于项目管理的笔记？">项目管理笔记</span>
+        <span class="tag-chip" data-prompt="列出所有已标记的待办事项">待办事项</span>
+        <span class="tag-chip" data-prompt="找出关于学习计划的记录">学习计划</span>
+        <span class="tag-chip" data-prompt="回顾本周的主要收获">本周回顾</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>提问设置</h2>
+        <p>未配置 OpenAI 时会自动使用来源型回答。</p>
+      </div>
+      <form class="ask-form" method="post" action="/ask">
+        <input type="hidden" name="session_id" value="{{ session_id }}">
+        <label class="question-field">
+          问题
+          <textarea name="question" rows="4" placeholder="例如：我之前关于 RAG 的笔记有哪些？">{{ question }}</textarea>
+        </label>
+        <div class="ask-options">
+          <label>
+            对话会话
+            <select name="session_id_selector">{{ session_options }}</select>
+          </label>
+          <label>
+            检索模式
+            <select name="search_mode">{{ search_mode_options }}</select>
+          </label>
+          <label>
+            来源数量
+            <input type="number" name="limit" value="{{ limit }}" min="1" max="10">
+          </label>
+          <label>
+            模型
+            <input type="text" name="model" value="{{ model }}">
+          </label>
+          <label>
+            回答风格
+            <select name="answer_style">{{ answer_style_options }}</select>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="use_llm" value="1" {{ use_llm_checked }}>
+            使用 LLM 生成回答
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" name="use_embeddings" value="1" {{ use_embeddings_checked }}>
+            启用向量检索
+          </label>
+        </div>
+        <button type="submit">提问</button>
+      </form>
+    </section>
+
+    {{ conversation_panel }}
+    {{ answer_panel }}
+    {{ session_history_panel }}
+
+    <section class="panel">
+      <div class="panel-heading">
+        <h2>Ask 工作流</h2>
+        <p>当前已支持多轮对话、历史保存、引用高亮、回答风格切换和保存为笔记。</p>
+      </div>
+      <div class="placeholder-grid">
+        <article class="placeholder-card"><h3>多轮对话</h3><p>已支持：保留当前会话上下文继续追问。</p></article>
+        <article class="placeholder-card"><h3>对话历史</h3><p>已支持：保存并切换最近会话。</p></article>
+        <article class="placeholder-card"><h3>保存为笔记</h3><p>已支持：将最新回答沉淀到 `knowledge/topics/`。</p></article>
+        <article class="placeholder-card"><h3>引用高亮</h3><p>已支持：展示来源卡片和片段高亮。</p></article>
+        <article class="placeholder-card"><h3>回答风格</h3><p>已支持：简洁、平衡、详细、报告四种风格。</p></article>
+      </div>
+    </section>
+  </main>
+
+<script>
+(function() {
+  const prompts = document.getElementById('quick-prompts');
+  const textarea = document.querySelector('textarea[name="question"]');
+  if (!prompts || !textarea) return;
+
+  prompts.addEventListener('click', function(e) {
+    const chip = e.target.closest('[data-prompt]');
+    if (!chip) return;
+    textarea.value = chip.getAttribute('data-prompt');
+    textarea.focus();
+    textarea.scrollTop = textarea.scrollHeight;
+  });
+})();
+</script>
+</body>
+</html>
