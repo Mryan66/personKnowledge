@@ -1,3 +1,4 @@
+import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -29,7 +30,7 @@ from app.tools.openai_client import OpenAIClient, OpenAIClientError
 from app.web.dashboard import render_dashboard
 from app.web.inbox import render_inbox
 from app.web.knowledge import render_document_preview, render_knowledge
-from app.web.ask import render_ask
+from app.web.ask import render_ask, render_answer_panel, render_chat_status_bar, render_conversation_panel, render_session_history_drawer
 from app.web.review import read_review_file, render_review
 from app.web.search import render_search
 from app.web.settings import render_settings
@@ -301,6 +302,63 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
     def _handle_ask_post(self) -> None:
         settings = get_settings()
         form = self._read_form()
+        ask_state = self._process_ask_form(settings, form)
+        if self.headers.get("X-Requested-With", "") == "fetch":
+            self._send_json(
+                {
+                    "session_id": ask_state["session_id"],
+                    "answer_state": ask_state["answer_state"],
+                    "fragments": {
+                        "chat_status_bar": render_chat_status_bar(
+                            openai_status="已配置" if settings.openai_api_key else "未配置",
+                            openai_status_class="status-ok" if settings.openai_api_key else "status-warn",
+                            answer_mode=ask_state["answer"].mode if ask_state["answer"] else "未提问",
+                            answer_confidence=ask_state["answer"].confidence if ask_state["answer"] else "-",
+                        ),
+                        "session_history_drawer": render_session_history_drawer(ask_state["sessions"], ask_state["session_id"]),
+                        "conversation_panel": render_conversation_panel(
+                            ask_state["messages"],
+                            answer=ask_state["answer"],
+                            message=ask_state["message"],
+                        ),
+                        "answer_panel": render_answer_panel(
+                            ask_state["answer"],
+                            ask_state["message"],
+                            session_id=ask_state["session_id"],
+                            question=ask_state["question"],
+                            search_mode=ask_state["search_mode"],
+                            limit=ask_state["limit"],
+                            use_llm=ask_state["use_llm"],
+                            use_embeddings=ask_state["use_embeddings"],
+                            model=ask_state["model"],
+                            answer_style=ask_state["answer_style"],
+                            answer_state=ask_state["answer_state"],
+                        ),
+                    },
+                }
+            )
+            return
+        self._send_html(
+            render_ask(
+                settings,
+                TEMPLATE_DIR / "ask.html",
+                question=ask_state["question"],
+                search_mode=ask_state["search_mode"],
+                limit=ask_state["limit"],
+                use_llm=ask_state["use_llm"],
+                use_embeddings=ask_state["use_embeddings"],
+                model=ask_state["model"],
+                answer_style=ask_state["answer_style"],
+                session_id=ask_state["session_id"],
+                sessions=ask_state["sessions"],
+                messages=ask_state["messages"],
+                answer=ask_state["answer"],
+                message=ask_state["message"],
+                answer_state=ask_state["answer_state"],
+            )
+        )
+
+    def _process_ask_form(self, settings, form: dict) -> dict:
         question = form.get("question", [""])[0].strip()
         selected_session = form.get("session_id_selector", [""])[0].strip() or form.get("session_id", [""])[0].strip()
         search_mode = form.get("search_mode", ["auto"])[0]
@@ -352,25 +410,21 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             message = "请输入问题。"
         sessions = list_chat_sessions(settings.resolved_database_path, limit=20)
         messages = list_chat_messages(settings.resolved_database_path, int(session_id), limit=100) if session_id.isdigit() else []
-        self._send_html(
-            render_ask(
-                settings,
-                TEMPLATE_DIR / "ask.html",
-                question=question,
-                search_mode=search_mode,
-                limit=limit,
-                use_llm=use_llm,
-                use_embeddings=use_embeddings,
-                model=model,
-                answer_style=answer_style,
-                session_id=session_id,
-                sessions=sessions,
-                messages=messages,
-                answer=answer,
-                message=message,
-                answer_state=answer_state,
-            )
-        )
+        return {
+            "question": question,
+            "search_mode": search_mode,
+            "limit": limit,
+            "use_llm": use_llm,
+            "use_embeddings": use_embeddings,
+            "model": model,
+            "answer_style": answer_style,
+            "session_id": session_id,
+            "sessions": sessions,
+            "messages": messages,
+            "answer": answer,
+            "message": message,
+            "answer_state": answer_state,
+        }
 
     def _handle_ask_save_note_post(self) -> None:
         settings = get_settings()
@@ -661,6 +715,14 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         body = html.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_json(self, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

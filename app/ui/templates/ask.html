@@ -21,63 +21,57 @@
   </aside>
 
   <main class="page">
-    <header class="hero compact-hero">
-      <div>
+    <header class="chat-page-header">
+      <div class="chat-page-title">
         <p class="eyebrow">Ask AI</p>
-        <h1>向知识库提问</h1>
-        <p>先从你的资料里找依据，再给出可继续追问的回答。</p>
+        <h1>AI 问答</h1>
       </div>
-      <div class="status-panel">
-        <div><span>OpenAI</span><strong class="{{ openai_status_class }}">{{ openai_status }}</strong></div>
-        <div><span>回答模式</span><strong>{{ answer_mode }}</strong></div>
-        <div><span>置信度</span><strong>{{ answer_confidence }}</strong></div>
+      <div class="chat-page-status" id="ask-status-bar">
+        {{ chat_status_bar }}
       </div>
     </header>
 
-    <section class="panel">
-      <div class="panel-heading">
-        <h2>快速提示</h2>
-        <p>点击快速填充问题。</p>
-      </div>
-      <div class="chip-row" id="quick-prompts">
-        <span class="tag-chip" data-prompt="总结最近的知识">总结最近的知识</span>
-        <span class="tag-chip" data-prompt="有哪些关于项目管理的笔记？">项目管理笔记</span>
-        <span class="tag-chip" data-prompt="列出所有已标记的待办事项">待办事项</span>
-        <span class="tag-chip" data-prompt="找出关于学习计划的记录">学习计划</span>
-        <span class="tag-chip" data-prompt="回顾本周的主要收获">本周回顾</span>
+    <section class="ask-chat-layout">
+      <div class="ask-main-column">
+        {{ prefill_context_panel }}
+        <div id="ask-session-drawer">{{ session_history_drawer }}</div>
+        <div id="ask-conversation-region">{{ conversation_panel }}</div>
       </div>
     </section>
 
-    <section class="panel">
-      <div class="panel-heading">
-        <h2>提问设置</h2>
-        <p>直接输入问题即可。未配置 OpenAI 时，会自动改用来源摘要回答。</p>
-      </div>
+    <section class="panel ask-composer-panel">
       <form class="ask-form progress-form" method="post" action="/ask" data-progress-text="正在检索相关知识并组织回答...">
         <input type="hidden" name="session_id" value="{{ session_id }}">
-        <label class="question-field">
-          问题
-          <textarea name="question" rows="4" placeholder="例如：我之前关于 RAG 的笔记有哪些？">{{ question }}</textarea>
-        </label>
-        <div class="ask-options">
-          <label>
-            对话会话
-            <select name="session_id_selector">{{ session_options }}</select>
+        <input type="hidden" name="session_id_selector" value="{{ session_id }}">
+        <input type="hidden" name="answer_style" value="balanced">
+        <div class="ask-input-bar">
+          <label class="question-field compact-question-field">
+            <textarea name="question" rows="3" placeholder="输入你的问题，像聊天一样直接发送...">{{ question }}</textarea>
           </label>
-          <label>
-            回答风格
-            <select name="answer_style">{{ answer_style_options }}</select>
-          </label>
+          <button type="submit" data-loading-label="发送中...">发送</button>
+        </div>
+        <div class="chip-row compact-chip-row" id="quick-prompts">
+          <span class="tag-chip" data-prompt="帮我总结最近关于 RAG 的记录">最近的 RAG</span>
+          <span class="tag-chip" data-prompt="我之前对 Agent 的核心理解是什么？">Agent 理解</span>
+          <span class="tag-chip" data-prompt="这些资料里下一步最值得补什么？">下一步</span>
         </div>
         <details class="advanced-settings">
           <summary>高级设置</summary>
           <div class="ask-options">
             <label>
-              搜索模式
+              回答风格
+              <select name="answer_style">{{ answer_style_options }}</select>
+            </label>
+            <label>
+              对话会话
+              <select name="session_id_selector">{{ session_options }}</select>
+            </label>
+            <label>
+              理解方式
               <select name="search_mode">{{ search_mode_options }}</select>
             </label>
             <label>
-              来源数量
+              引用数量
               <input type="number" name="limit" value="{{ limit }}" min="1" max="10">
             </label>
             <label>
@@ -90,32 +84,14 @@
             </label>
             <label class="checkbox-label">
               <input type="checkbox" name="use_embeddings" value="1" {{ use_embeddings_checked }}>
-              增强语义理解（推荐）
+              语义理解增强（推荐）
             </label>
           </div>
         </details>
-        <button type="submit" data-loading-label="正在生成回答...">开始提问</button>
       </form>
     </section>
 
-    {{ prefill_context_panel }}
-    {{ conversation_panel }}
-    {{ answer_panel }}
-    {{ session_history_panel }}
-
-    <section class="panel">
-      <div class="panel-heading">
-        <h2>Ask 工作流</h2>
-        <p>当前已支持多轮对话、历史保存、引用高亮、回答风格切换和保存为笔记。</p>
-      </div>
-      <div class="placeholder-grid">
-        <article class="placeholder-card"><h3>多轮对话</h3><p>已支持：保留当前会话上下文继续追问。</p></article>
-        <article class="placeholder-card"><h3>对话历史</h3><p>已支持：保存并切换最近会话。</p></article>
-        <article class="placeholder-card"><h3>保存为笔记</h3><p>已支持：将最新回答沉淀到 `knowledge/topics/`。</p></article>
-        <article class="placeholder-card"><h3>引用高亮</h3><p>已支持：展示来源卡片和片段高亮。</p></article>
-        <article class="placeholder-card"><h3>回答风格</h3><p>已支持：简洁、平衡、详细、报告四种风格。</p></article>
-      </div>
-    </section>
+    <div id="ask-answer-region">{{ answer_panel }}</div>
   </main>
 
 <script>
@@ -125,6 +101,10 @@
   const form = document.querySelector('.progress-form');
   const liveRegion = document.querySelector('[data-live-region]');
   const resultPanel = document.querySelector('[data-result-panel]');
+  const conversationRegion = document.getElementById('ask-conversation-region');
+  const answerRegion = document.getElementById('ask-answer-region');
+  const sessionDrawerRegion = document.getElementById('ask-session-drawer');
+  const statusBarRegion = document.getElementById('ask-status-bar');
   if (!prompts || !textarea) return;
 
   prompts.addEventListener('click', function(e) {
@@ -136,8 +116,12 @@
   });
 
   if (form) {
-    form.addEventListener('submit', function() {
+    form.addEventListener('submit', async function(event) {
+      event.preventDefault();
       const button = form.querySelector('button[type="submit"]');
+      let loadingPanel = document.getElementById('ask-loading-panel');
+      const question = textarea.value.trim();
+      if (!question) return;
       if (button) {
         button.disabled = true;
         button.textContent = button.getAttribute('data-loading-label') || '正在处理中...';
@@ -145,10 +129,60 @@
       if (liveRegion) {
         liveRegion.textContent = form.getAttribute('data-progress-text') || '正在检索相关知识并组织回答...';
       }
-      if (resultPanel) {
-        resultPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (!loadingPanel) {
+        loadingPanel = document.createElement('section');
+        loadingPanel.id = 'ask-loading-panel';
+        loadingPanel.className = 'panel loading-panel';
+        loadingPanel.innerHTML = '<div class="panel-heading"><h2>知识助手正在处理</h2><p>先检索资料，再组织回答。</p></div><div class="loading-steps"><span>正在检索相关知识...</span><span>正在组织回答...</span><span>正在生成最终回答...</span></div>';
+        form.closest('.page').querySelector('.ask-main-column')?.prepend(loadingPanel);
+      }
+      try {
+        const response = await fetch('/ask', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'X-Requested-With': 'fetch'
+          },
+          body: new URLSearchParams(new FormData(form)).toString()
+        });
+        if (!response.ok) {
+          form.submit();
+          return;
+        }
+        const payload = await response.json();
+        if (statusBarRegion) statusBarRegion.innerHTML = payload.fragments.chat_status_bar || '';
+        if (sessionDrawerRegion) sessionDrawerRegion.innerHTML = payload.fragments.session_history_drawer || '';
+        if (conversationRegion) conversationRegion.innerHTML = payload.fragments.conversation_panel || '';
+        if (answerRegion) answerRegion.innerHTML = payload.fragments.answer_panel || '';
+        const sessionIdField = form.querySelector('input[name="session_id"]');
+        const sessionSelectorHidden = form.querySelector('input[name="session_id_selector"]');
+        if (sessionIdField) sessionIdField.value = payload.session_id || '';
+        if (sessionSelectorHidden) sessionSelectorHidden.value = payload.session_id || '';
+        textarea.value = '';
+        const chatThread = document.querySelector('.chat-thread');
+        if (chatThread) {
+          chatThread.scrollTop = chatThread.scrollHeight;
+        }
+        const updatedResultPanel = document.querySelector('[data-result-panel]');
+        if (updatedResultPanel) {
+          updatedResultPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+      } catch (error) {
+        form.submit();
+        return;
+      } finally {
+        if (loadingPanel) loadingPanel.remove();
+        if (button) {
+          button.disabled = false;
+          button.textContent = '发送';
+        }
       }
     });
+  }
+
+  const chatThread = document.querySelector('.chat-thread');
+  if (chatThread) {
+    chatThread.scrollTop = chatThread.scrollHeight;
   }
 })();
 </script>
