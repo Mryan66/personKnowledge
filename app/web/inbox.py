@@ -5,13 +5,16 @@ from typing import Optional
 from app.config import Settings
 from app.ingest.pipeline import IngestBatchResult
 from app.ingest.scanner import scan_inbox
+from app.ui.rendering import render_template
 
 
 def render_inbox(settings: Settings, template_path: Path, batch: Optional[IngestBatchResult] = None, message: str = "") -> str:
-    template = template_path.read_text(encoding="utf-8")
     files = scan_inbox(settings.resolved_inbox_dir)
-    replacements = {
+    context = {
         "app_name": settings.app_name,
+        "active_nav": "inbox",
+        "page_name": "inbox",
+        "frontend_assets_enabled": settings.frontend_assets_enabled,
         "inbox_path": escape(str(settings.resolved_inbox_dir)),
         "openai_status": "已配置" if settings.openai_api_key else "未配置",
         "openai_status_class": "status-ok" if settings.openai_api_key else "status-warn",
@@ -20,9 +23,7 @@ def render_inbox(settings: Settings, template_path: Path, batch: Optional[Ingest
         "result_panel": render_result_panel(batch, message),
         "getting_started_panel": render_getting_started_panel(settings, files),
     }
-    for key, value in replacements.items():
-        template = template.replace("{{ " + key + " }}", value)
-    return template
+    return render_template(template_path, context)
 
 
 def render_inbox_files(files) -> str:

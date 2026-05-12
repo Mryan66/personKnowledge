@@ -1,25 +1,8 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Knowledge 知识库 - {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <aside class="sidebar">
-    <div class="brand">AI 知识管家</div>
-    <nav>
-      <a href="/dashboard">首页</a>
-      <a href="/inbox">导入资料</a>
-      <a class="active" href="/knowledge">知识库</a>
-      <a href="/search">搜索</a>
-      <a href="/ask">AI 问答</a>
-      <a href="/review">知识复盘</a>
-      <a href="/settings">设置</a>
-    </nav>
-  </aside>
+{% extends "layouts/base.html" %}
 
+{% block title %}Knowledge 知识库 - {{ app_name }}{% endblock %}
+
+{% block body %}
   <main class="page">
     <header class="hero compact-hero">
       <div>
@@ -35,7 +18,7 @@
       </div>
     </header>
 
-    {{ message_panel }}
+    {{ message_panel | safe }}
 
     <section class="panel">
       <div class="panel-heading">
@@ -55,7 +38,7 @@
         <h2>分类概览</h2>
         <p>按当前文档元数据聚合。</p>
       </div>
-      <div class="chip-row">{{ category_filters }}</div>
+      <div class="chip-row">{{ category_filters | safe }}</div>
     </section>
 
     <section class="panel">
@@ -63,7 +46,7 @@
         <h2>标签云</h2>
         <p>展示出现频率最高的标签。</p>
       </div>
-      <div class="chip-row">{{ tag_cloud }}</div>
+      <div class="chip-row">{{ tag_cloud | safe }}</div>
     </section>
 
     <section class="panel">
@@ -76,30 +59,30 @@
           <button type="submit">批量删除</button>
           <button type="submit" formaction="/knowledge/batch-reingest">批量重新导入</button>
         </div>
-      <div class="table-wrap">
-        <table class="data-table knowledge-table">
-          <thead>
-            <tr>
-              <th>选择</th>
-              <th>文档</th>
-              <th>分类</th>
-              <th>标签</th>
-              <th>摘要</th>
-              <th>Chunk</th>
-              <th>Embedding</th>
-              <th>状态</th>
-              <th>更新时间</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{ document_rows }}
-          </tbody>
-        </table>
-      </div>
+        <div class="table-wrap">
+          <table class="data-table knowledge-table">
+            <thead>
+              <tr>
+                <th>选择</th>
+                <th>文档</th>
+                <th>分类</th>
+                <th>标签</th>
+                <th>摘要</th>
+                <th>Chunk</th>
+                <th>Embedding</th>
+                <th>状态</th>
+                <th>更新时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{ document_rows | safe }}
+            </tbody>
+          </table>
+        </div>
       </form>
     </section>
 
-    {{ document_detail_panel }}
+    {{ document_detail_panel | safe }}
   </main>
 
 <script>
@@ -166,7 +149,6 @@
 
   const table = filterInput.closest('.page').querySelector('.data-table');
   const rows = table ? Array.from(table.querySelectorAll('tbody tr')) : [];
-  const emptyRow = '<tr><td colspan="9" class="muted center">无匹配的文档。</td></tr>';
 
   filterInput.addEventListener('input', function() {
     const term = this.value.trim().toLowerCase();
@@ -189,12 +171,11 @@
           tr.innerHTML = '<td colspan="9" class="muted center">无匹配的文档。</td>';
           tbody.appendChild(tr);
         }
-      } else {
-        if (existingEmpty) existingEmpty.remove();
+      } else if (existingEmpty) {
+        existingEmpty.remove();
       }
     }
   });
 })();
 </script>
-</body>
-</html>
+{% endblock %}

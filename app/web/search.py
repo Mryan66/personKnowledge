@@ -4,6 +4,7 @@ from typing import List
 from urllib.parse import quote
 
 from app.config import Settings
+from app.ui.rendering import render_template
 from app.tools.search_tool import SearchResult
 
 SEARCH_MODES = {
@@ -28,9 +29,11 @@ def render_search(
     search_history = search_history or []
     filters = filters or {}
     normalized_mode = mode if mode in SEARCH_MODES else "auto"
-    template = template_path.read_text(encoding="utf-8")
-    replacements = {
+    context = {
         "app_name": settings.app_name,
+        "active_nav": "search",
+        "page_name": "search",
+        "frontend_assets_enabled": settings.frontend_assets_enabled,
         "query": escape(query),
         "limit": str(limit),
         "category_filter": escape(filters.get("category", "")),
@@ -46,9 +49,7 @@ def render_search(
         "results_panel": render_results_panel(results, query, message, filters=filters),
         "search_history_panel": render_search_history_panel(search_history),
     }
-    for key, value in replacements.items():
-        template = template.replace("{{ " + key + " }}", value)
-    return template
+    return render_template(template_path, context)
 
 
 def render_mode_options(selected_mode: str) -> str:

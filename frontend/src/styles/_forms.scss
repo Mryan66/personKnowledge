@@ -1,0 +1,130 @@
+.inline-form,
+.search-form,
+.review-form,
+.ask-options {
+  display: grid;
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.inline-form {
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+}
+
+.search-form {
+  grid-template-columns: minmax(280px, 1fr) minmax(220px, 320px) 110px auto;
+}
+
+.review-form {
+  grid-template-columns: 130px auto auto;
+}
+
+.ask-options {
+  grid-template-columns: minmax(180px, 1fr) 110px minmax(180px, 1fr) auto auto;
+}
+
+.ask-form,
+.settings-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.inline-form label,
+.search-form label,
+.review-form label,
+.ask-form label,
+.settings-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted-strong);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.search-form input,
+.search-form select,
+.review-form input[type="number"],
+.ask-form textarea,
+.ask-form input[type="text"],
+.ask-form input[type="number"],
+.ask-form select,
+.settings-form input[type="text"],
+.settings-form input[type="password"],
+.settings-form input[type="number"],
+.settings-form textarea {
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: inset 0 1px 2px rgba(23, 80, 121, 0.04);
+}
+
+textarea {
+  resize: vertical;
+  line-height: 1.65;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(54, 162, 235, 0.56);
+  box-shadow:
+    0 0 0 4px rgba(54, 162, 235, 0.14),
+    inset 0 1px 2px rgba(23, 80, 121, 0.04);
+}
+
+.checkbox-label {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 10px !important;
+  padding-bottom: 11px;
+  white-space: nowrap;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.question-field textarea {
+  min-height: 112px;
+}
+
+.advanced-settings {
+  grid-column: 1 / -1;
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: rgba(223, 243, 255, 0.4);
+}
+
+.advanced-settings summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.advanced-settings[open] {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (max-width: 999px) {
+  .inline-form,
+  .search-form,
+  .review-form,
+  .ask-options {
+    grid-template-columns: 1fr;
+  }
+
+  .checkbox-label {
+    padding-bottom: 0;
+  }
+}

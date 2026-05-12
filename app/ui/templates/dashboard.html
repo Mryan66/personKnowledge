@@ -1,25 +1,8 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <aside class="sidebar">
-    <div class="brand">AI 知识管家</div>
-    <nav>
-      <a class="active" href="/dashboard">首页</a>
-      <a href="/inbox">导入资料</a>
-      <a href="/knowledge">知识库</a>
-      <a href="/search">搜索</a>
-      <a href="/ask">AI 问答</a>
-      <a href="/review">知识复盘</a>
-      <a href="/settings">设置</a>
-    </nav>
-  </aside>
+{% extends "layouts/base.html" %}
 
+{% block title %}{{ app_name }}{% endblock %}
+
+{% block body %}
   <main class="page">
     <header class="hero">
       <div>
@@ -46,10 +29,10 @@
         <h2>开始使用</h2>
         <p>先完成这 4 步，就能体验到完整的知识助手流程。</p>
       </div>
-      {{ onboarding_panel }}
+      {{ onboarding_panel | safe }}
     </section>
 
-    {{ growth_panel }}
+    {{ growth_panel | safe }}
 
     <section class="content-grid">
       <article class="panel">
@@ -58,7 +41,7 @@
           <p>展示最近更新的知识库文档。</p>
         </div>
         <ul class="recent-list">
-          {{ recent_documents }}
+          {{ recent_documents | safe }}
         </ul>
       </article>
 
@@ -82,9 +65,8 @@
         <p>这些能力会让你的知识库更快进入日常使用节奏。</p>
       </div>
       <div class="placeholder-grid">
-        {{ placeholder_cards }}
+        {{ placeholder_cards | safe }}
       </div>
     </section>
   </main>
-</body>
-</html>
+{% endblock %}

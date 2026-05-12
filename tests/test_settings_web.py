@@ -2,7 +2,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from app.config import Settings, get_openai_api_key, read_env_file, remove_env_keys, write_env_values
+from app.config import FRONTEND_DIST_DIR, Settings, get_openai_api_key, read_env_file, remove_env_keys, resolve_frontend_assets_enabled, write_env_values
+from app.ui.rendering import build_static_css_href, render_asset_tags, reset_rendering_caches
 from app.web.server import parse_openai_settings_form
 from app.web.settings import (
     render_environment_keys,
@@ -16,6 +17,9 @@ from app.web.settings import (
 
 
 class SettingsWebTests(unittest.TestCase):
+    def tearDown(self):
+        reset_rendering_caches()
+
     def test_render_settings_rows_escapes_values(self):
         html = render_settings_rows([("Key", "<secret>")])
 
@@ -117,14 +121,39 @@ class SettingsWebTests(unittest.TestCase):
         self.assertIn("KB_DATABASE_PATH", html)
         self.assertIn("保存配置", html)
 
-    def test_settings_template_uses_unified_sidebar_labels(self):
-        template_path = Path("/Library/temp/personKnowledge/app/ui/templates/settings.html")
-        html = template_path.read_text(encoding="utf-8")
+    def test_render_asset_tags_disabled_by_default(self):
+        self.assertEqual("", render_asset_tags(False))
 
-        self.assertIn(">首页<", html)
-        self.assertIn(">导入资料<", html)
-        self.assertIn(">AI 问答<", html)
-        self.assertIn(">设置<", html)
+    def test_render_settings_page_skips_frontend_assets_by_default(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            template_path = root / "settings.html"
+            template_path.write_text("{{ asset_tags }} {{ app_name }}", encoding="utf-8")
+            settings = Settings(workspace_dir=root)
+
+            html = render_settings(settings, template_path)
+
+        self.assertIn("Personal AI Knowledge Butler", html)
+        self.assertNotIn("/assets/", html)
+
+    def test_frontend_assets_auto_enable_when_manifest_exists(self):
+        self.assertEqual(resolve_frontend_assets_enabled({}), (FRONTEND_DIST_DIR / ".vite" / "manifest.json").exists())
+
+    def test_build_static_css_href_uses_version_query(self):
+        href = build_static_css_href()
+
+        self.assertTrue(href.startswith("/static/app.css"))
+        self.assertIn("?v=", href)
+
+    def test_settings_template_uses_unified_sidebar_labels(self):
+        settings_template = Path("/Library/temp/personKnowledge/app/ui/templates/settings.html").read_text(encoding="utf-8")
+        base_template = Path("/Library/temp/personKnowledge/app/ui/templates/layouts/base.html").read_text(encoding="utf-8")
+
+        self.assertIn('{% extends "layouts/base.html" %}', settings_template)
+        self.assertIn(">首页<", base_template)
+        self.assertIn(">导入资料<", base_template)
+        self.assertIn(">AI 问答<", base_template)
+        self.assertIn(">设置<", base_template)
 
 
 if __name__ == "__main__":

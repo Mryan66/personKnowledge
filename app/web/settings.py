@@ -2,11 +2,13 @@ from html import escape
 from pathlib import Path
 
 from app.config import Settings
+from app.ui.rendering import render_template
 
 
 ENVIRONMENT_KEYS = [
     "OPENAI_API_KEY",
     "KB_OPENAI_API_KEY",
+    "KB_FRONTEND_ASSETS",
     "KB_OPENAI_MODEL",
     "KB_OPENAI_EMBEDDING_MODEL",
     "KB_OPENAI_BASE_URL",
@@ -22,9 +24,11 @@ ENVIRONMENT_KEYS = [
 
 
 def render_settings(settings: Settings, template_path: Path, message: str = "") -> str:
-    template = template_path.read_text(encoding="utf-8")
-    replacements = {
+    context = {
         "app_name": settings.app_name,
+        "active_nav": "settings",
+        "page_name": "settings",
+        "frontend_assets_enabled": settings.frontend_assets_enabled,
         "openai_status": "已配置" if settings.openai_api_key else "未配置",
         "openai_status_class": "status-ok" if settings.openai_api_key else "status-warn",
         "message_panel": render_message_panel(message),
@@ -34,9 +38,7 @@ def render_settings(settings: Settings, template_path: Path, message: str = "") 
         "retrieval_settings": render_retrieval_settings(settings),
         "environment_keys": render_environment_keys(),
     }
-    for key, value in replacements.items():
-        template = template.replace("{{ " + key + " }}", value)
-    return template
+    return render_template(template_path, context)
 
 
 def render_message_panel(message: str) -> str:

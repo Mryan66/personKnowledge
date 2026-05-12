@@ -4,6 +4,7 @@ from typing import Optional
 
 from app.agents.query_agent import Answer
 from app.config import Settings
+from app.ui.rendering import render_template
 from app.web.search import SEARCH_MODES, render_mode_options
 
 ANSWER_STYLES = {
@@ -36,9 +37,12 @@ def render_ask(
     messages = messages or []
     normalized_mode = search_mode if search_mode in SEARCH_MODES else "auto"
     selected_model = model or settings.openai_model
-    template = template_path.read_text(encoding="utf-8")
-    replacements = {
+    context = {
         "app_name": settings.app_name,
+        "active_nav": "ask",
+        "page_name": "ask",
+        "frontend_assets_enabled": settings.frontend_assets_enabled,
+        "frontend_asset_css_enabled": False,
         "question": escape(question),
         "limit": str(limit),
         "model": escape(selected_model),
@@ -85,9 +89,7 @@ def render_ask(
             answer_state=answer_state,
         ),
     }
-    for key, value in replacements.items():
-        template = template.replace("{{ " + key + " }}", value)
-    return template
+    return render_template(template_path, context)
 
 
 def render_chat_status_bar(openai_status: str, openai_status_class: str, answer_mode: str, answer_confidence: str) -> str:
@@ -108,6 +110,8 @@ def render_ask_status_badge(answer: Optional[Answer], answer_state: str) -> str:
         return '<span class="tag-chip">已切换到来源摘要</span>'
     if answer_state == "config_error":
         return '<span class="tag-chip">需要检查设置</span>'
+    if answer and answer.mode == "general":
+        return '<span class="tag-chip">AI 兜底回答</span>'
     if answer and answer.mode == "rag":
         return '<span class="tag-chip">智能回答</span>'
     if answer and answer.mode == "extractive":
@@ -210,6 +214,7 @@ def render_answer_panel(
 def describe_answer_mode(mode: str) -> str:
     mapping = {
         "rag": "智能回答",
+        "general": "AI 兜底回答",
         "extractive": "来源摘要",
         "fallback": "来源摘要（模型失败后切换）",
         "none": "暂无结果",
@@ -275,6 +280,8 @@ def render_answer_summary(
             )
             + '<div class="toolbar"><a class="secondary-button" href="/settings">检查设置</a></div>'
         )
+    if answer.mode == "general":
+        return '<div class="summary-card">我没有在知识库中找到直接相关内容，所以先用通用 AI 能力给你一个兜底回答。若你补充资料，后续回答会更可追溯。</div>'
     if answer.mode == "extractive":
         return '<div class="summary-card">我已经先根据现有资料整理出来源摘要，你可以继续追问，或先检查引用依据。</div>'
     return '<div class="summary-card">回答已生成。我先给你结论，再把依据和后续建议一起展开。</div>'
@@ -380,6 +387,7 @@ def render_conversation_panel(messages: list, answer: Optional[Answer] = None, m
             '<section class="panel conversation-shell chat-surface">'
             '<div class="panel-heading"><h2>开始聊天</h2><p>像和知识助手聊天一样直接输入问题，我会先找资料，再给答案。</p></div>'
             '<div class="empty-conversation-state">'
+            '<div class="empty-conversation-mark">Ask AI</div>'
             '<strong>你可以直接问：</strong>'
             '<p>“我最近关于 RAG 的重点结论是什么？”</p>'
             '<p>“这些资料里下一步最值得补什么？”</p>'
@@ -389,14 +397,25 @@ def render_conversation_panel(messages: list, answer: Optional[Answer] = None, m
     for chat_message in messages:
         role_class = "chat-user" if chat_message.role == "user" else "chat-assistant"
         role_label = "你" if chat_message.role == "user" else "知识助手"
+        role_avatar = "你" if chat_message.role == "user" else "AI"
         parts.append(
-            f'<article class="chat-bubble {role_class}"><div class="chat-bubble-head"><strong>{role_label}</strong></div><pre>{escape(chat_message.content)}</pre></article>'
+            (
+                f'<article class="chat-bubble {role_class}">'
+                f'<div class="chat-avatar" aria-hidden="true">{role_avatar}</div>'
+                '<div class="chat-bubble-shell">'
+                f'<div class="chat-bubble-head"><strong>{role_label}</strong><span>{escape(chat_message.created_at)}</span></div>'
+                f'<div class="chat-bubble-body"><pre>{escape(chat_message.content)}</pre></div>'
+                '</div></article>'
+            )
         )
     if answer is None and message:
         parts.append(
             '<article class="chat-bubble chat-assistant chat-loading">'
-            '<div class="chat-bubble-head"><strong>知识助手</strong></div>'
-            f'<p>{escape(message)}</p>'
+            '<div class="chat-avatar" aria-hidden="true">AI</div>'
+            '<div class="chat-bubble-shell">'
+            '<div class="chat-bubble-head"><strong>知识助手</strong><span>处理中</span></div>'
+            f'<div class="chat-bubble-body"><p>{escape(message)}</p></div>'
+            '</div>'
             '</article>'
         )
     parts.append("</div></section>")
@@ -418,14 +437,14 @@ def render_session_history_panel(sessions: list, selected_session_id: str) -> st
 
 def render_session_history_drawer(sessions: list, selected_session_id: str) -> str:
     if not sessions:
-        return ""
-    parts = ['<details class="session-drawer">', '<summary>历史会话</summary>', '<ul class="history-list compact-history-list">']
+        return '<div class="session-drawer"><div class="session-drawer-label">历史会话</div><div class="empty-history-state">还没有历史会话，发出第一条问题后会出现在这里。</div></div>'
+    parts = ['<div class="session-drawer"><div class="session-drawer-label">历史会话</div><ul class="history-list compact-history-list">']
     for session in sessions:
         active = ' class="active-history"' if str(session.id) == str(selected_session_id) else ""
         parts.append(
             f'<li{active}><a href="/ask?session_id={session.id}">{escape(session.title)}</a><small>{escape(session.updated_at)}</small></li>'
         )
-    parts.append("</ul></details>")
+    parts.append("</ul></div>")
     return "\n".join(parts)
 
 

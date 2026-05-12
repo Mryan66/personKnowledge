@@ -4,6 +4,7 @@ import re
 from typing import Optional
 
 from app.config import Settings
+from app.ui.rendering import render_template
 from app.memory.database import DocumentRecord, ChunkRecord, get_dashboard_stats, list_document_overviews
 
 
@@ -21,9 +22,11 @@ def render_knowledge(
 ) -> str:
     stats = get_dashboard_stats(settings.resolved_database_path)
     documents = list_document_overviews(settings.resolved_database_path, limit=limit)
-    template = template_path.read_text(encoding="utf-8")
-    replacements = {
+    context = {
         "app_name": settings.app_name,
+        "active_nav": "knowledge",
+        "page_name": "knowledge",
+        "frontend_assets_enabled": settings.frontend_assets_enabled,
         "document_count": str(stats["document_count"]),
         "chunk_count": str(stats["chunk_count"]),
         "embedding_count": str(stats["embedding_count"]),
@@ -42,9 +45,7 @@ def render_knowledge(
             selected_chunk,
         ),
     }
-    for key, value in replacements.items():
-        template = template.replace("{{ " + key + " }}", value)
-    return template
+    return render_template(template_path, context)
 
 
 def render_document_rows(documents: list) -> str:

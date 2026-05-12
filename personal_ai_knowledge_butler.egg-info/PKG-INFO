@@ -1,3 +1,14 @@
+Metadata-Version: 2.4
+Name: personal-ai-knowledge-butler
+Version: 0.1.0
+Summary: A local-first personal AI knowledge butler for organizing, searching, and reviewing notes.
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: jinja2>=3.1.0
+Requires-Dist: pypdf>=4.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+
 # Personal AI Knowledge Butler
 
 一个本地优先的个人 AI 知识管家，用于整理、检索、复盘和调用个人知识。
@@ -131,18 +142,10 @@ cd frontend
 npm run build
 ```
 
-启用迁移线样式验收：
-
-```bash
-KB_FRONTEND_ASSETS=true python3 -m app.cli web
-```
-
 说明：
 
 - 如果未执行前端构建，页面仍会回退到现有 `/static/app.css` 样式与基础交互，不会阻塞后端运行。
 - 当前 `ask` 页面已开始迁移到新架构，其余页面会逐步迁移。
-- 只有当你显式设置 `KB_FRONTEND_ASSETS=true` 时，服务端才会注入 `frontend/dist` 下的构建产物，避免迁移期新旧样式冲突。
-- 推荐验收顺序：`dashboard -> inbox -> search -> ask -> knowledge -> review -> settings`。
 
 ## 配置 OpenAI / 火山引擎 API
 

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ static_css_href }}">
+  {{ asset_tags | safe }}
+</head>
+<body data-page="{{ page_name | default('default') }}">
+  <aside class="sidebar">
+    <div class="brand">AI 知识管家</div>
+    <nav>
+      <a class="{% if active_nav == 'dashboard' %}active{% endif %}" href="/dashboard">首页</a>
+      <a class="{% if active_nav == 'inbox' %}active{% endif %}" href="/inbox">导入资料</a>
+      <a class="{% if active_nav == 'knowledge' %}active{% endif %}" href="/knowledge">知识库</a>
+      <a class="{% if active_nav == 'search' %}active{% endif %}" href="/search">搜索</a>
+      <a class="{% if active_nav == 'ask' %}active{% endif %}" href="/ask">AI 问答</a>
+      <a class="{% if active_nav == 'review' %}active{% endif %}" href="/review">知识复盘</a>
+      <a class="{% if active_nav == 'settings' %}active{% endif %}" href="/settings">设置</a>
+    </nav>
+  </aside>
+
+  {% block body %}{% endblock %}
+</body>
+</html>

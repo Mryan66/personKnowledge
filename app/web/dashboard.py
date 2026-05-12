@@ -2,6 +2,7 @@ from html import escape
 from pathlib import Path
 
 from app.config import Settings
+from app.ui.rendering import render_template
 from app.memory.database import get_dashboard_stats, get_document_growth_stats
 
 
@@ -17,9 +18,11 @@ def render_dashboard(settings: Settings, template_path: Path) -> str:
     stats = get_dashboard_stats(settings.resolved_database_path)
     growth_stats = get_document_growth_stats(settings.resolved_database_path, days=30)
     review_count = count_reviews(settings.resolved_knowledge_dir / "reviews")
-    template = template_path.read_text(encoding="utf-8")
-    replacements = {
+    context = {
         "app_name": settings.app_name,
+        "active_nav": "dashboard",
+        "page_name": "dashboard",
+        "frontend_assets_enabled": settings.frontend_assets_enabled,
         "document_count": str(stats["document_count"]),
         "chunk_count": str(stats["chunk_count"]),
         "embedding_count": str(stats["embedding_count"]),
@@ -38,9 +41,7 @@ def render_dashboard(settings: Settings, template_path: Path) -> str:
         ),
         "placeholder_cards": render_placeholder_cards(),
     }
-    for key, value in replacements.items():
-        template = template.replace("{{ " + key + " }}", value)
-    return template
+    return render_template(template_path, context)
 
 
 def render_recent_documents(documents) -> str:

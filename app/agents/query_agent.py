@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from app.tools.citation_tool import format_source
 from app.tools.openai_client import OpenAIClient, OpenAIClientError
@@ -61,6 +61,14 @@ RAG_INSTRUCTIONS = """你是个人 AI 知识管家的问答 Agent。请只基于
 4. 如果资料不足，请明确说“不足以确认”，不要编造。
 5. 最后给出 1-3 个可执行的下一步建议。"""
 
+GENERAL_INSTRUCTIONS = """你是个人 AI 知识管家的通用问答 Agent。
+要求：
+1. 用中文回答，除非用户问题明确要求其他语言。
+2. 先明确说明当前没有在知识库中检索到直接相关内容，下面的回答基于通用模型知识。
+3. 回答要尽量有帮助，但不要伪造“知识库来源”或引用不存在的材料。
+4. 如果问题存在时效性、不确定性或需要外部事实校验，要明确提示用户。
+5. 最后给出 1-3 个建议，说明可以补充哪些资料到知识库以获得更可靠的回答。"""
+
 STYLE_HINTS = {
     "concise": "回答尽量简洁，先结论后 2-4 个要点。",
     "balanced": "回答兼顾简洁与解释，适合一般问答。",
@@ -91,6 +99,21 @@ class QueryAgent:
         result_limit = limit or self.default_limit
         results = self.search_tool.search(question, limit=result_limit, mode=self.search_mode)
         if not results:
+            if self.use_llm and self.openai_client:
+                try:
+                    return self._generate_general_answer(question, history=history)
+                except OpenAIClientError as error:
+                    return Answer(
+                        question=question,
+                        text=(
+                            "我还没有在知识库中找到相关内容。"
+                            f"同时，通用 AI 回答生成失败：{error}。可以先导入更多资料，或换一个关键词提问。"
+                        ),
+                        sources=[],
+                        confidence="none",
+                        mode="none",
+                        style=self.answer_style,
+                    )
             return Answer(
                 question=question,
                 text="我还没有在知识库中找到相关内容。可以先导入更多资料，或换一个关键词提问。",
@@ -103,6 +126,57 @@ class QueryAgent:
         if self.use_llm and self.openai_client:
             try:
                 return self._generate_rag_answer(question, results, history=history)
+            except OpenAIClientError as error:
+                fallback = self._generate_extractive_answer(question, results)
+                return Answer(
+                    question=question,
+                    text=f"OpenAI RAG 生成失败，已回退到来源型回答。错误：{error}\n\n{fallback.text}",
+                    sources=fallback.sources,
+                    confidence=fallback.confidence,
+                    mode="fallback",
+                    style=self.answer_style,
+                    citations=fallback.citations,
+                )
+
+        return self._generate_extractive_answer(question, results)
+
+    def stream_answer(
+        self,
+        question: str,
+        on_delta: Callable[[Answer], None],
+        limit: Optional[int] = None,
+        history: Optional[List[dict]] = None,
+    ) -> Answer:
+        result_limit = limit or self.default_limit
+        results = self.search_tool.search(question, limit=result_limit, mode=self.search_mode)
+        if not results:
+            if self.use_llm and self.openai_client:
+                try:
+                    return self._stream_general_answer(question, on_delta=on_delta, history=history)
+                except OpenAIClientError as error:
+                    return Answer(
+                        question=question,
+                        text=(
+                            "我还没有在知识库中找到相关内容。"
+                            f"同时，通用 AI 回答生成失败：{error}。可以先导入更多资料，或换一个关键词提问。"
+                        ),
+                        sources=[],
+                        confidence="none",
+                        mode="none",
+                        style=self.answer_style,
+                    )
+            return Answer(
+                question=question,
+                text="我还没有在知识库中找到相关内容。可以先导入更多资料，或换一个关键词提问。",
+                sources=[],
+                confidence="none",
+                mode="none",
+                style=self.answer_style,
+            )
+
+        if self.use_llm and self.openai_client:
+            try:
+                return self._stream_rag_answer(question, results, on_delta=on_delta, history=history)
             except OpenAIClientError as error:
                 fallback = self._generate_extractive_answer(question, results)
                 return Answer(
@@ -130,6 +204,86 @@ class QueryAgent:
             mode="rag",
             style=self.answer_style,
             citations=self._build_citations(results),
+        )
+
+    def _stream_rag_answer(
+        self,
+        question: str,
+        results: List[SearchResult],
+        on_delta: Callable[[Answer], None],
+        history: Optional[List[dict]] = None,
+    ) -> Answer:
+        chunks = []
+        citations = self._build_citations(results)
+        for delta in self.openai_client.generate_text_stream(
+            instructions=build_rag_instructions(self.answer_style),
+            input_text=build_rag_input(question, results, history=history, style=self.answer_style),
+        ):
+            chunks.append(delta)
+            on_delta(
+                Answer(
+                    question=question,
+                    text="".join(chunks),
+                    sources=self._collect_sources(results),
+                    confidence=self._estimate_confidence(results),
+                    mode="rag",
+                    style=self.answer_style,
+                    citations=[],
+                )
+            )
+        return Answer(
+            question=question,
+            text="".join(chunks),
+            sources=self._collect_sources(results),
+            confidence=self._estimate_confidence(results),
+            mode="rag",
+            style=self.answer_style,
+            citations=citations,
+        )
+
+    def _generate_general_answer(self, question: str, history: Optional[List[dict]] = None) -> Answer:
+        response = self.openai_client.generate_text(
+            instructions=build_general_instructions(self.answer_style),
+            input_text=build_general_input(question, history=history, style=self.answer_style),
+        )
+        return Answer(
+            question=question,
+            text=response.text,
+            sources=[],
+            confidence="low",
+            mode="general",
+            style=self.answer_style,
+        )
+
+    def _stream_general_answer(
+        self,
+        question: str,
+        on_delta: Callable[[Answer], None],
+        history: Optional[List[dict]] = None,
+    ) -> Answer:
+        chunks = []
+        for delta in self.openai_client.generate_text_stream(
+            instructions=build_general_instructions(self.answer_style),
+            input_text=build_general_input(question, history=history, style=self.answer_style),
+        ):
+            chunks.append(delta)
+            on_delta(
+                Answer(
+                    question=question,
+                    text="".join(chunks),
+                    sources=[],
+                    confidence="low",
+                    mode="general",
+                    style=self.answer_style,
+                )
+            )
+        return Answer(
+            question=question,
+            text="".join(chunks),
+            sources=[],
+            confidence="low",
+            mode="general",
+            style=self.answer_style,
         )
 
     def _generate_extractive_answer(self, question: str, results: List[SearchResult]) -> Answer:
@@ -175,6 +329,29 @@ class QueryAgent:
 def build_rag_instructions(answer_style: str) -> str:
     hint = STYLE_HINTS.get(answer_style, STYLE_HINTS["balanced"])
     return f"{RAG_INSTRUCTIONS}\n补充风格要求：{hint}"
+
+
+def build_general_instructions(answer_style: str) -> str:
+    hint = STYLE_HINTS.get(answer_style, STYLE_HINTS["balanced"])
+    return f"{GENERAL_INSTRUCTIONS}\n补充风格要求：{hint}"
+
+
+def build_general_input(question: str, history: Optional[List[dict]] = None, style: str = "balanced") -> str:
+    sections = [f"回答风格：{style}"]
+    if history:
+        sections.extend(["", "最近对话："])
+        for item in history[-6:]:
+            role = "用户" if item.get("role") == "user" else "助手"
+            sections.append(f"{role}：{item.get('content', '')}")
+    sections.extend(
+        [
+            "",
+            "知识库检索结果：未命中",
+            "要求：先说明知识库里没找到直接相关内容，再基于通用能力回答。",
+            f"当前问题：{question}",
+        ]
+    )
+    return "\n".join(sections).strip()
 
 
 def build_extractive_lines(results: List[SearchResult], answer_style: str) -> List[str]:

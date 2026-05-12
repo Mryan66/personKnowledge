@@ -1,0 +1,3 @@
+[console_scripts]
+kb = app.cli:main
+knowledge-butler = app.cli:main

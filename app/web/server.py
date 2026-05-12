@@ -1,15 +1,18 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from mimetypes import guess_type
 from pathlib import Path
+from urllib.parse import urlencode
 from urllib.parse import parse_qs, urlparse
 
 from app.agents.organizer_agent import OrganizerAgent
-from app.agents.query_agent import QueryAgent
+from app.agents.query_agent import Answer, QueryAgent
 from app.agents.review_agent import ReviewAgent
 from app.config import get_settings, remove_env_keys, write_env_values
 from app.ingest.parser import DocumentParseError, parse_document
 from app.ingest.pipeline import ingest_file, ingest_path
 from app.memory.database import (
+    ChatMessageRecord,
     add_chat_message,
     add_search_history,
     create_or_update_chat_session,
@@ -40,6 +43,7 @@ from app.tools.search_tool import SearchTool
 ROOT_DIR = Path(__file__).resolve().parents[2]
 TEMPLATE_DIR = ROOT_DIR / "app" / "ui" / "templates"
 STATIC_DIR = ROOT_DIR / "app" / "ui" / "static"
+FRONTEND_DIST_DIR = ROOT_DIR / "frontend" / "dist"
 
 
 class KnowledgeButlerHandler(BaseHTTPRequestHandler):
@@ -63,6 +67,9 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         if path == "/ask":
             self._handle_ask_get()
             return
+        if path == "/ask/stream":
+            self._handle_ask_stream_get()
+            return
         if path == "/review":
             self._handle_review_get()
             return
@@ -71,6 +78,9 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             return
         if path == "/static/app.css":
             self._send_file(STATIC_DIR / "app.css", "text/css; charset=utf-8")
+            return
+        if path.startswith("/assets/"):
+            self._handle_asset_get(path)
             return
         self.send_error(404, "Page not found")
 
@@ -303,40 +313,8 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         settings = get_settings()
         form = self._read_form()
         ask_state = self._process_ask_form(settings, form)
-        if self.headers.get("X-Requested-With", "") == "fetch":
-            self._send_json(
-                {
-                    "session_id": ask_state["session_id"],
-                    "answer_state": ask_state["answer_state"],
-                    "fragments": {
-                        "chat_status_bar": render_chat_status_bar(
-                            openai_status="已配置" if settings.openai_api_key else "未配置",
-                            openai_status_class="status-ok" if settings.openai_api_key else "status-warn",
-                            answer_mode=ask_state["answer"].mode if ask_state["answer"] else "未提问",
-                            answer_confidence=ask_state["answer"].confidence if ask_state["answer"] else "-",
-                        ),
-                        "session_history_drawer": render_session_history_drawer(ask_state["sessions"], ask_state["session_id"]),
-                        "conversation_panel": render_conversation_panel(
-                            ask_state["messages"],
-                            answer=ask_state["answer"],
-                            message=ask_state["message"],
-                        ),
-                        "answer_panel": render_answer_panel(
-                            ask_state["answer"],
-                            ask_state["message"],
-                            session_id=ask_state["session_id"],
-                            question=ask_state["question"],
-                            search_mode=ask_state["search_mode"],
-                            limit=ask_state["limit"],
-                            use_llm=ask_state["use_llm"],
-                            use_embeddings=ask_state["use_embeddings"],
-                            model=ask_state["model"],
-                            answer_style=ask_state["answer_style"],
-                            answer_state=ask_state["answer_state"],
-                        ),
-                    },
-                }
-            )
+        if self.headers.get("HX-Request", "").lower() == "true":
+            self._send_html(render_ask_partial_payload(settings, ask_state))
             return
         self._send_html(
             render_ask(
@@ -357,6 +335,28 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 answer_state=ask_state["answer_state"],
             )
         )
+
+    def _handle_ask_stream_get(self) -> None:
+        settings = get_settings()
+        query = parse_qs(urlparse(self.path).query)
+        self._send_sse_headers()
+        try:
+            self._stream_ask_flow(settings, query)
+        except BrokenPipeError:
+            return
+        except ConnectionResetError:
+            return
+
+    def _handle_asset_get(self, path: str) -> None:
+        relative_path = path.removeprefix("/assets/")
+        asset_path = (FRONTEND_DIST_DIR / relative_path).resolve()
+        if FRONTEND_DIST_DIR.resolve() not in asset_path.parents and asset_path != FRONTEND_DIST_DIR.resolve():
+            self.send_error(403, "Invalid asset path")
+            return
+        content_type = guess_type(str(asset_path))[0] or "application/octet-stream"
+        if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
+            content_type = f"{content_type}; charset=utf-8"
+        self._send_file(asset_path, content_type)
 
     def _process_ask_form(self, settings, form: dict) -> dict:
         question = form.get("question", [""])[0].strip()
@@ -394,6 +394,9 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 if answer.mode == "none":
                     answer_state = "no_results"
                     message = "你的知识库里暂时没有足够相关的信息。试试换个问法，或者先导入相关资料。"
+                elif answer.mode == "general":
+                    answer_state = "success"
+                    message = "没有检索到知识库内容，已切换到通用 AI 兜底回答。"
                 elif answer.mode == "fallback":
                     answer_state = "model_error"
                     message = "AI 回答未完整生成，已切换为来源摘要模式。你可以立即重试。"
@@ -711,6 +714,51 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(content_length).decode("utf-8") if content_length else ""
         return parse_qs(body)
 
+    def _send_sse_headers(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+
+    def _send_sse_event(self, event: str, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False)
+        self.wfile.write(f"event: {event}\n".encode("utf-8"))
+        self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
+        self.wfile.flush()
+
+    def _send_sse_patch(self, settings, ask_state: dict, include_answer: bool = True) -> None:
+        self._send_sse_event(
+            "patch",
+            {
+                "status_bar": render_chat_status_bar(
+                    openai_status="已配置" if settings.openai_api_key else "未配置",
+                    openai_status_class="status-ok" if settings.openai_api_key else "status-warn",
+                    answer_mode=ask_state["answer"].mode if ask_state["answer"] else "处理中",
+                    answer_confidence=ask_state["answer"].confidence if ask_state["answer"] else "-",
+                ),
+                "session_drawer": render_session_history_drawer(ask_state["sessions"], ask_state["session_id"]),
+                "conversation": render_conversation_panel(
+                    ask_state["messages"],
+                    answer=ask_state["answer"],
+                    message=ask_state["message"],
+                ),
+                "answer": render_answer_panel(
+                    ask_state["answer"] if include_answer else None,
+                    ask_state["message"],
+                    session_id=ask_state["session_id"],
+                    question=ask_state["question"],
+                    search_mode=ask_state["search_mode"],
+                    limit=ask_state["limit"],
+                    use_llm=ask_state["use_llm"],
+                    use_embeddings=ask_state["use_embeddings"],
+                    model=ask_state["model"],
+                    answer_style=ask_state["answer_style"],
+                    answer_state=ask_state["answer_state"],
+                ),
+            },
+        )
+
     def _send_html(self, html: str) -> None:
         body = html.encode("utf-8")
         self.send_response(200)
@@ -737,6 +785,120 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _stream_ask_flow(self, settings, values: dict) -> None:
+        question = values.get("question", [""])[0].strip()
+        selected_session = values.get("session_id_selector", [""])[0].strip() or values.get("session_id", [""])[0].strip()
+        search_mode = values.get("search_mode", ["auto"])[0]
+        use_llm = values.get("use_llm", [""])[0] == "1"
+        use_embeddings = values.get("use_embeddings", [""])[0] == "1"
+        model = values.get("model", [settings.openai_model])[0].strip() or settings.openai_model
+        answer_style = values.get("answer_style", ["balanced"])[0].strip() or "balanced"
+        try:
+            limit = max(1, min(10, int(values.get("limit", ["3"])[0])))
+        except ValueError:
+            limit = 3
+
+        if not question:
+            self._send_sse_event("error", {"message": "请输入问题。"})
+            self._send_sse_event("done", {})
+            return
+
+        session_id = str(
+            create_or_update_chat_session(
+                settings.resolved_database_path,
+                int(selected_session) if selected_session.isdigit() else None,
+                title=question[:40],
+            )
+        )
+        history_messages = list_chat_messages(settings.resolved_database_path, int(session_id), limit=12)
+        history = [{"role": item.role, "content": item.content} for item in history_messages]
+        add_chat_message(settings.resolved_database_path, int(session_id), "user", question, style=answer_style)
+        user_messages = list_chat_messages(settings.resolved_database_path, int(session_id), limit=100)
+
+        self._send_sse_event("phase", {"label": "正在检索相关知识..."})
+        self._send_sse_patch(
+            settings,
+            {
+                "question": question,
+                "search_mode": search_mode,
+                "limit": limit,
+                "use_llm": use_llm,
+                "use_embeddings": use_embeddings,
+                "model": model,
+                "answer_style": answer_style,
+                "session_id": session_id,
+                "sessions": list_chat_sessions(settings.resolved_database_path, limit=20),
+                "messages": user_messages,
+                "answer": None,
+                "message": "正在检索相关知识...",
+                "answer_state": "streaming",
+            },
+            include_answer=False,
+        )
+
+        try:
+            openai_client = build_openai_client(settings, model=model) if settings.openai_api_key and use_llm else None
+            query_agent = QueryAgent(
+                settings.resolved_database_path,
+                openai_client=openai_client,
+                use_llm=bool(openai_client),
+                embedding_tool=build_embedding_tool(settings) if use_embeddings else None,
+                search_mode=search_mode,
+                answer_style=answer_style,
+            )
+            self._send_sse_event("phase", {"label": "正在生成最终回答..."})
+            partial_answer_box = {"value": None}
+
+            def push_partial_answer(partial_answer: Answer) -> None:
+                partial_answer_box["value"] = partial_answer
+                self._send_sse_patch(
+                    settings,
+                    {
+                        "question": question,
+                        "search_mode": search_mode,
+                        "limit": limit,
+                        "use_llm": use_llm,
+                        "use_embeddings": use_embeddings,
+                        "model": model,
+                        "answer_style": answer_style,
+                        "session_id": session_id,
+                        "sessions": list_chat_sessions(settings.resolved_database_path, limit=20),
+                        "messages": build_streaming_messages(user_messages, partial_answer),
+                        "answer": partial_answer,
+                        "message": "正在生成最终回答...",
+                        "answer_state": "streaming",
+                    },
+                    include_answer=False,
+                )
+
+            answer = query_agent.stream_answer(question, on_delta=push_partial_answer, limit=limit, history=history)
+            add_chat_message(settings.resolved_database_path, int(session_id), "assistant", answer.text, sources=answer.sources, style=answer_style)
+            final_messages = list_chat_messages(settings.resolved_database_path, int(session_id), limit=100)
+            answer_state, message = resolve_answer_feedback(answer, question)
+            final_state = {
+                "question": question,
+                "search_mode": search_mode,
+                "limit": limit,
+                "use_llm": use_llm,
+                "use_embeddings": use_embeddings,
+                "model": model,
+                "answer_style": answer_style,
+                "session_id": session_id,
+                "sessions": list_chat_sessions(settings.resolved_database_path, limit=20),
+                "messages": final_messages,
+                "answer": answer,
+                "message": message,
+                "answer_state": answer_state,
+            }
+            self._send_sse_patch(settings, final_state, include_answer=True)
+            self._send_sse_event("done", {"session_id": session_id, "redirect": f"/ask?{urlencode({'session_id': session_id})}"})
+        except OpenAIClientError as error:
+            self._send_sse_event("error", {"message": f"模型调用超时或失败：{error}。你可以立即重试，或先改用来源摘要回答。"})
+            self._send_sse_event("done", {"session_id": session_id})
+        except Exception as error:
+            self._send_sse_event("error", {"message": f"提问失败：{error}。请检查配置，或稍后重试。"})
+            self._send_sse_event("done", {"session_id": session_id})
 
 
 def parse_openai_settings_form(form: dict, current_settings):
@@ -840,6 +1002,76 @@ def build_prefill_context(context_title: str, context_source: str) -> str:
     if title and source:
         return f"当前问题将围绕《{title}》展开，来源片段：{source}"
     return f"当前问题将围绕这条搜索结果展开：{title or source}"
+
+
+def build_streaming_messages(messages: list, answer: Answer) -> list:
+    session_id = messages[0].session_id if messages else 0
+    assistant_message = ChatMessageRecord(
+        id=0,
+        session_id=session_id,
+        role="assistant",
+        content=answer.text,
+        sources=answer.sources,
+        style=answer.style,
+        created_at="处理中",
+    )
+    return list(messages) + [assistant_message]
+
+
+def resolve_answer_feedback(answer: Answer, question: str) -> tuple[str, str]:
+    if answer.mode == "none":
+        return "no_results", "你的知识库里暂时没有足够相关的信息。试试换个问法，或者先导入相关资料。"
+    if answer.mode == "general":
+        return "success", "没有检索到知识库内容，已切换到通用 AI 兜底回答。"
+    if answer.mode == "fallback":
+        return "model_error", "AI 回答未完整生成，已切换为来源摘要模式。你可以立即重试。"
+    return "success", f"已提问：{question}"
+
+
+def render_ask_partial_payload(settings, ask_state: dict) -> str:
+    fragments = [
+        (
+            "ask-status-bar",
+            render_chat_status_bar(
+                openai_status="已配置" if settings.openai_api_key else "未配置",
+                openai_status_class="status-ok" if settings.openai_api_key else "status-warn",
+                answer_mode=ask_state["answer"].mode if ask_state["answer"] else "未提问",
+                answer_confidence=ask_state["answer"].confidence if ask_state["answer"] else "-",
+            ),
+        ),
+        (
+            "ask-session-drawer",
+            render_session_history_drawer(ask_state["sessions"], ask_state["session_id"]),
+        ),
+        (
+            "ask-conversation-region",
+            render_conversation_panel(
+                ask_state["messages"],
+                answer=ask_state["answer"],
+                message=ask_state["message"],
+            ),
+        ),
+        (
+            "ask-answer-region",
+            render_answer_panel(
+                ask_state["answer"],
+                ask_state["message"],
+                session_id=ask_state["session_id"],
+                question=ask_state["question"],
+                search_mode=ask_state["search_mode"],
+                limit=ask_state["limit"],
+                use_llm=ask_state["use_llm"],
+                use_embeddings=ask_state["use_embeddings"],
+                model=ask_state["model"],
+                answer_style=ask_state["answer_style"],
+                answer_state=ask_state["answer_state"],
+            ),
+        ),
+    ]
+    parts = []
+    for target_id, html in fragments:
+        parts.append(f'<div id="{target_id}" hx-swap-oob="innerHTML">{html}</div>')
+    return "\n".join(parts)
 
 
 def slugify_filename(text: str) -> str:

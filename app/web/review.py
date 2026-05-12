@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from app.agents.review_agent import ReviewReport
 from app.config import Settings
+from app.ui.rendering import render_template
 
 
 REVIEW_PERIODS = {
@@ -25,10 +26,12 @@ def render_review(
     selected_body: str = "",
     message: str = "",
 ) -> str:
-    template = template_path.read_text(encoding="utf-8")
     reviews_dir = settings.resolved_knowledge_dir / "reviews"
-    replacements = {
+    context = {
         "app_name": settings.app_name,
+        "active_nav": "review",
+        "page_name": "review",
+        "frontend_assets_enabled": settings.frontend_assets_enabled,
         "limit": str(limit),
         "period": escape(period),
         "period_options": render_period_options(period),
@@ -40,9 +43,7 @@ def render_review(
         "history_list": render_history_list(reviews_dir, selected_review),
         "selected_review_panel": render_selected_review_panel(selected_review, selected_body),
     }
-    for key, value in replacements.items():
-        template = template.replace("{{ " + key + " }}", value)
-    return template
+    return render_template(template_path, context)
 
 
 def render_period_options(selected_period: str) -> str:

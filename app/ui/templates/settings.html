@@ -1,25 +1,8 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Settings 设置 - {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <aside class="sidebar">
-    <div class="brand">AI 知识管家</div>
-    <nav>
-      <a href="/dashboard">首页</a>
-      <a href="/inbox">导入资料</a>
-      <a href="/knowledge">知识库</a>
-      <a href="/search">搜索</a>
-      <a href="/ask">AI 问答</a>
-      <a href="/review">知识复盘</a>
-      <a class="active" href="/settings">设置</a>
-    </nav>
-  </aside>
+{% extends "layouts/base.html" %}
 
+{% block title %}Settings 设置 - {{ app_name }}{% endblock %}
+
+{% block body %}
   <main class="page">
     <header class="hero compact-hero">
       <div>
@@ -34,7 +17,7 @@
       </div>
     </header>
 
-    {{ message_panel }}
+    {{ message_panel | safe }}
 
     <section class="content-grid">
       <article class="panel">
@@ -42,7 +25,7 @@
           <h2>路径设置</h2>
           <p>当前文件系统和数据库路径。</p>
         </div>
-        <table class="settings-table"><tbody>{{ path_settings }}</tbody></table>
+        <table class="settings-table"><tbody>{{ path_settings | safe }}</tbody></table>
       </article>
 
       <article class="panel">
@@ -50,7 +33,7 @@
           <h2>OpenAI 设置</h2>
           <p>API Key 不会明文展示。</p>
         </div>
-        <table class="settings-table"><tbody>{{ openai_settings }}</tbody></table>
+        <table class="settings-table"><tbody>{{ openai_settings | safe }}</tbody></table>
       </article>
     </section>
 
@@ -59,7 +42,7 @@
         <h2>编辑 OpenAI 配置</h2>
         <p>保存到项目根目录的 `.env` 文件。</p>
       </div>
-      {{ openai_form }}
+      {{ openai_form | safe }}
     </section>
 
     <section class="panel">
@@ -67,7 +50,7 @@
         <h2>检索设置</h2>
         <p>当前 Search / Ask / Ingest 的默认行为。</p>
       </div>
-      <table class="settings-table"><tbody>{{ retrieval_settings }}</tbody></table>
+      <table class="settings-table"><tbody>{{ retrieval_settings | safe }}</tbody></table>
     </section>
 
     <section class="panel">
@@ -75,8 +58,7 @@
         <h2>支持的环境变量</h2>
         <p>通过 shell 环境变量覆盖配置。</p>
       </div>
-      <div class="env-grid">{{ environment_keys }}</div>
+      <div class="env-grid">{{ environment_keys | safe }}</div>
     </section>
   </main>
-</body>
-</html>
+{% endblock %}

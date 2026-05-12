@@ -59,6 +59,21 @@ class AskWebTests(unittest.TestCase):
         self.assertIn("暂时没有足够相关的信息", html)
         self.assertIn("立即重试", html)
 
+    def test_render_answer_panel_general_fallback_state(self):
+        answer = Answer(
+            question="什么是 MCP？",
+            text="知识库中未找到相关内容，以下基于通用知识回答。",
+            sources=[],
+            confidence="low",
+            mode="general",
+            style="balanced",
+        )
+
+        html = render_answer_panel(answer, message="general", question="什么是 MCP？")
+
+        self.assertIn("通用 AI 能力", html)
+        self.assertIn("AI 兜底回答", html)
+
     def test_render_answer_panel_fallback_state_includes_source_only_action(self):
         answer = Answer(
             question="RAG 是什么？",
@@ -145,6 +160,14 @@ class AskWebTests(unittest.TestCase):
 
         self.assertIn("直接提问", badge)
 
+    def test_render_ask_status_badge_general_mode(self):
+        badge = render_ask_status_badge(
+            Answer("什么是 MCP？", "answer", [], "low", "general", style="balanced"),
+            "success",
+        )
+
+        self.assertIn("AI 兜底回答", badge)
+
     def test_render_ask_sidebar(self):
         html = render_ask_sidebar(
             sessions=[ChatSessionRecord(2, "Agent 对话", "2026-05-06", "2026-05-06")],
@@ -205,6 +228,19 @@ class AskWebTests(unittest.TestCase):
         self.assertIn("Agent 笔记", html)
         self.assertIn("来源摘要", html)
         self.assertIn("历史会话", html)
+
+    def test_render_ask_page_includes_frontend_script_without_vite_css(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            template_path = root / "ask.html"
+            template_path.write_text("{{ asset_tags }}", encoding="utf-8")
+            settings = Settings(workspace_dir=root, frontend_assets_enabled=True)
+
+            html = render_ask(settings, template_path)
+
+        self.assertIn("/assets/", html)
+        self.assertIn("&lt;script", html)
+        self.assertNotIn('<link rel="stylesheet" href="/assets/', html)
 
 
 if __name__ == "__main__":

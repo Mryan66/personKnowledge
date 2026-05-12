@@ -1,25 +1,8 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Review 复盘 - {{ app_name }}</title>
-  <link rel="stylesheet" href="/static/app.css">
-</head>
-<body>
-  <aside class="sidebar">
-    <div class="brand">AI 知识管家</div>
-    <nav>
-      <a href="/dashboard">首页</a>
-      <a href="/inbox">导入资料</a>
-      <a href="/knowledge">知识库</a>
-      <a href="/search">搜索</a>
-      <a href="/ask">AI 问答</a>
-      <a class="active" href="/review">知识复盘</a>
-      <a href="/settings">设置</a>
-    </nav>
-  </aside>
+{% extends "layouts/base.html" %}
 
+{% block title %}Review 复盘 - {{ app_name }}{% endblock %}
+
+{% block body %}
   <main class="page">
     <header class="hero compact-hero">
       <div>
@@ -39,10 +22,10 @@
         <h2>生成复盘</h2>
         <p>基于最近入库文档生成 Markdown 报告，并提炼关键关注点。</p>
       </div>
-      <form class="review-form progress-form" method="post" action="/review" data-progress-text="正在整理最近知识并生成复盘...">
+      <form class="review-form progress-form" method="post" action="/review">
         <label>
           复盘周期
-          <select name="period">{{ period_options }}</select>
+          <select name="period">{{ period_options | safe }}</select>
         </label>
         <label>
           文档数量
@@ -52,12 +35,12 @@
           <input type="checkbox" name="write_file" value="1" {{ write_file_checked }}>
           写入 Review 文件
         </label>
-        <button type="submit" data-loading-label="正在生成复盘...">生成复盘</button>
+        <button type="submit">生成复盘</button>
       </form>
     </section>
 
-    {{ report_panel }}
-    {{ selected_review_panel }}
+    {{ report_panel | safe }}
+    {{ selected_review_panel | safe }}
 
     <section class="panel">
       <div class="panel-heading">
@@ -65,31 +48,8 @@
         <p>点击文件名查看已生成的复盘内容。</p>
       </div>
       <ul class="history-list">
-        {{ history_list }}
+        {{ history_list | safe }}
       </ul>
     </section>
   </main>
-<script>
-(function() {
-  const form = document.querySelector('.progress-form');
-  const liveRegion = document.querySelector('[data-live-region]');
-  const resultPanel = document.querySelector('[data-result-panel]');
-  if (!form) return;
-
-  form.addEventListener('submit', function() {
-    const button = form.querySelector('button[type="submit"]');
-    if (button) {
-      button.disabled = true;
-      button.textContent = button.getAttribute('data-loading-label') || '正在处理中...';
-    }
-    if (liveRegion) {
-      liveRegion.textContent = form.getAttribute('data-progress-text') || '正在整理最近知识并生成复盘...';
-    }
-    if (resultPanel) {
-      resultPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  });
-})();
-</script>
-</body>
-</html>
+{% endblock %}

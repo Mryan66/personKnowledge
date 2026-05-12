@@ -5,6 +5,9 @@ from typing import Optional
 
 from app.tools.secret_store import load_openai_api_key
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+FRONTEND_DIST_DIR = ROOT_DIR / "frontend" / "dist"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -21,6 +24,7 @@ class Settings:
     openai_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     openai_timeout_seconds: int = 60
     enable_ocr: bool = False
+    frontend_assets_enabled: bool = False
 
     def resolve_path(self, path: Path) -> Path:
         if path.is_absolute():
@@ -60,6 +64,7 @@ def get_settings() -> Settings:
         openai_base_url=get_config_value("KB_OPENAI_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3", env_file_values),
         openai_timeout_seconds=int(get_config_value("KB_OPENAI_TIMEOUT_SECONDS", "60", env_file_values)),
         enable_ocr=get_config_value("KB_ENABLE_OCR", "false", env_file_values).lower() in ("true", "1", "yes"),
+        frontend_assets_enabled=resolve_frontend_assets_enabled(env_file_values),
     )
 
 
@@ -76,6 +81,15 @@ def get_openai_api_key(env_file_values: dict) -> Optional[str]:
 
 def get_config_value(key: str, default: str, env_file_values: dict) -> str:
     return os.getenv(key) or env_file_values.get(key) or default
+
+
+def resolve_frontend_assets_enabled(env_file_values: dict) -> bool:
+    configured = os.getenv("KB_FRONTEND_ASSETS")
+    if configured is None:
+        configured = env_file_values.get("KB_FRONTEND_ASSETS")
+    if configured is not None:
+        return configured.lower() in ("true", "1", "yes")
+    return (FRONTEND_DIST_DIR / ".vite" / "manifest.json").exists()
 
 
 def read_env_file(path: Path) -> dict:
