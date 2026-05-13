@@ -1,0 +1,24 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}标签治理 - {{ app_name }}{% endblock %}
+
+{% block body %}
+  <main class="page">
+    <header class="hero compact-hero">
+      <div>
+        <p class="eyebrow">Tags</p>
+        <h1>标签治理</h1>
+        <p>集中处理大小写、空格和近似写法不一致的标签。</p>
+      </div>
+      <div class="status-panel">
+        <div><span>标签总数</span><strong>{{ tag_count }}</strong></div>
+        <div><span>候选组</span><strong>{{ group_count }}</strong></div>
+        <div><span>已合并别名</span><strong>{{ alias_count }}</strong></div>
+      </div>
+    </header>
+
+    {{ message_panel | safe }}
+    {{ candidate_groups_panel | safe }}
+    {{ alias_history_panel | safe }}
+  </main>
+{% endblock %}

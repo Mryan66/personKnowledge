@@ -19,6 +19,7 @@ from app.memory.database import (
     count_tasks_by_status,
     create_manual_task,
     create_or_update_chat_session,
+    delete_tag_alias,
     delete_task,
     delete_document,
     get_chat_session,
@@ -29,6 +30,8 @@ from app.memory.database import (
     list_chat_messages,
     list_chat_sessions,
     list_tasks,
+    list_tag_aliases,
+    merge_tags,
     record_review_run,
     list_chunks,
     list_search_history,
@@ -55,6 +58,7 @@ from app.web.ask import (
 from app.web.review import read_review_file, render_review
 from app.web.search import render_search
 from app.web.settings import render_settings
+from app.web.tags import render_tags_page
 from app.web.tasks import render_tasks_page
 from app.tools.secret_store import SecretStoreError, save_openai_api_key
 from app.tools.search_tool import SearchTool
@@ -97,6 +101,9 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             return
         if path == "/tasks":
             self._handle_tasks_get()
+            return
+        if path == "/tags":
+            self._handle_tags_get()
             return
         if path == "/static/app.css":
             self._send_file(STATIC_DIR / "app.css", "text/css; charset=utf-8")
@@ -158,6 +165,12 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             return
         if path == "/tasks/delete":
             self._handle_tasks_delete_post()
+            return
+        if path == "/tags/merge":
+            self._handle_tags_merge_post()
+            return
+        if path == "/tags/alias/delete":
+            self._handle_tag_alias_delete_post()
             return
         self.send_error(404, "Page not found")
 
@@ -572,6 +585,12 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         except ValueError:
             self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message="任务状态无效。"))
 
+    def _handle_tags_get(self) -> None:
+        settings = get_settings()
+        query = parse_qs(urlparse(self.path).query)
+        message = query.get("message", [""])[0]
+        self._send_html(render_tags_page(settings, TEMPLATE_DIR / "tags.html", message=message))
+
     def _handle_tasks_create_post(self) -> None:
         settings = get_settings()
         form = self._read_form()
@@ -633,6 +652,26 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             return
         message = "任务已删除。" if delete_task(settings.resolved_database_path, task_id) else "未找到要删除的任务。"
         self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message=message))
+
+    def _handle_tags_merge_post(self) -> None:
+        settings = get_settings()
+        form = self._read_form()
+        canonical = form.get("canonical", [""])[0]
+        aliases = parse_alias_values(form)
+        try:
+            affected = merge_tags(settings.resolved_database_path, canonical=canonical, aliases=aliases)
+            message = f"标签已合并，更新了 {affected} 个文档。"
+        except ValueError as error:
+            message = f"标签合并失败：{error}"
+        self._send_html(render_tags_page(settings, TEMPLATE_DIR / "tags.html", message=message))
+
+    def _handle_tag_alias_delete_post(self) -> None:
+        settings = get_settings()
+        form = self._read_form()
+        alias = form.get("alias", [""])[0]
+        deleted = delete_tag_alias(settings.resolved_database_path, alias)
+        message = "别名记录已删除。" if deleted else "未找到要删除的别名记录。"
+        self._send_html(render_tags_page(settings, TEMPLATE_DIR / "tags.html", message=message))
 
     def _handle_knowledge_update_post(self) -> None:
         settings = get_settings()
@@ -1140,6 +1179,18 @@ def parse_task_id(form: dict):
     if not raw.isdigit():
         return None
     return int(raw)
+
+
+def parse_alias_values(form: dict) -> list[str]:
+    values = []
+    seen = set()
+    for raw in form.get("aliases", []):
+        value = raw.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+    return values
 
 
 def parse_document_ids(form: dict) -> list[int]:

@@ -98,6 +98,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     done_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS tag_aliases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    alias TEXT NOT NULL UNIQUE,
+    canonical TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -774,6 +781,142 @@ def list_all_tags(database_path: Path, limit: int = 50) -> List[Tuple[str, int]]
     return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
 
 
+def normalize_tag_for_compare(tag: str) -> str:
+    return re.sub(r"\s+", " ", (tag or "").strip()).lower()
+
+
+def list_tag_groups(database_path: Path) -> List[dict]:
+    initialize_database(database_path)
+    groups: dict[str, dict] = {}
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute("SELECT tags FROM documents").fetchall()
+        alias_rows = connection.execute("SELECT alias FROM tag_aliases").fetchall()
+
+    disabled_aliases = {normalize_tag_for_compare(row[0]) for row in alias_rows if (row[0] or "").strip()}
+    for row in rows:
+        try:
+            tags = json.loads(row[0] or "[]")
+        except json.JSONDecodeError:
+            continue
+        for raw_tag in tags:
+            tag = (raw_tag or "").strip()
+            normalized = normalize_tag_for_compare(tag)
+            if not normalized or normalized in disabled_aliases:
+                continue
+            group = groups.setdefault(normalized, {"counts": {}, "total_count": 0})
+            group["counts"][tag] = group["counts"].get(tag, 0) + 1
+            group["total_count"] += 1
+
+    results = []
+    for normalized, payload in groups.items():
+        variants = sorted(payload["counts"].items(), key=lambda item: (-item[1], item[0]))
+        if len(variants) < 2:
+            continue
+        results.append(
+            {
+                "normalized": normalized,
+                "canonical": variants[0][0],
+                "variants": variants,
+                "total_count": payload["total_count"],
+            }
+        )
+    return sorted(results, key=lambda item: (-item["total_count"], item["canonical"]))
+
+
+def merge_tags(database_path: Path, canonical: str, aliases: List[str]) -> int:
+    initialize_database(database_path)
+    canonical_value = (canonical or "").strip()
+    if not canonical_value:
+        raise ValueError("Canonical tag is required.")
+
+    alias_values = []
+    seen_aliases = set()
+    for raw_alias in aliases or []:
+        alias = (raw_alias or "").strip()
+        if not alias:
+            continue
+        normalized_alias = normalize_tag_for_compare(alias)
+        if not normalized_alias or alias == canonical_value or alias in seen_aliases:
+            continue
+        seen_aliases.add(alias)
+        alias_values.append(alias)
+    if not alias_values:
+        return 0
+
+    affected_count = 0
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            rows = connection.execute("SELECT id, tags FROM documents").fetchall()
+            for row in rows:
+                document_id = row[0]
+                try:
+                    tags = json.loads(row[1] or "[]")
+                except json.JSONDecodeError:
+                    continue
+                updated_tags = []
+                seen_tags = set()
+                changed = False
+                for raw_tag in tags:
+                    value = canonical_value if raw_tag in alias_values else raw_tag
+                    if raw_tag in alias_values:
+                        changed = True
+                    if value in seen_tags:
+                        if raw_tag in alias_values or value == canonical_value:
+                            changed = True
+                        continue
+                    seen_tags.add(value)
+                    updated_tags.append(value)
+                if not changed:
+                    continue
+                connection.execute(
+                    """
+                    UPDATE documents
+                    SET tags = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (json.dumps(updated_tags, ensure_ascii=False), document_id),
+                )
+                affected_count += 1
+
+            for alias in alias_values:
+                connection.execute(
+                    """
+                    INSERT INTO tag_aliases (alias, canonical)
+                    VALUES (?, ?)
+                    ON CONFLICT(alias) DO UPDATE SET
+                        canonical = excluded.canonical
+                    """,
+                    (alias, canonical_value),
+                )
+    return affected_count
+
+
+def list_tag_aliases(database_path: Path, limit: int = 100) -> List[dict]:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute(
+            """
+            SELECT id, alias, canonical, created_at
+            FROM tag_aliases
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [{"id": row[0], "alias": row[1], "canonical": row[2], "created_at": row[3]} for row in rows]
+
+
+def delete_tag_alias(database_path: Path, alias: str) -> bool:
+    initialize_database(database_path)
+    alias_value = (alias or "").strip()
+    if not alias_value:
+        return False
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            cursor = connection.execute("DELETE FROM tag_aliases WHERE alias = ?", (alias_value,))
+    return cursor.rowcount > 0
+
+
 def list_all_categories(database_path: Path) -> List[Tuple[str, int]]:
     initialize_database(database_path)
     with closing(sqlite3.connect(database_path)) as connection:
@@ -1224,6 +1367,16 @@ def ensure_document_columns(database_path: Path) -> None:
             )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_document_content ON tasks(document_id, content)"
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tag_aliases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alias TEXT NOT NULL UNIQUE,
+                    canonical TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
             )
         rows = connection.execute("PRAGMA table_info(documents)").fetchall()
         column_names = {row[1] for row in rows}

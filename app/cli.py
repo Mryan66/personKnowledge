@@ -11,6 +11,7 @@ from app.ingest.pipeline import ingest_path
 from app.ingest.scanner import scan_inbox
 from app.memory.database import initialize_database, record_review_run
 from app.memory.database import create_manual_task, delete_task, list_tasks, update_task_status
+from app.memory.database import list_tag_aliases, list_tag_groups, merge_tags
 from app.tools.embedding_tool import EmbeddingTool
 from app.tools.openai_client import OpenAIClient
 from app.tools.search_tool import SearchTool
@@ -244,6 +245,38 @@ def tasks_delete(args: argparse.Namespace) -> None:
     print(f"Deleted task #{args.id}." if deleted else f"Task #{args.id} not found.")
 
 
+def tags_groups(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    groups = list_tag_groups(settings.resolved_database_path)
+    if not groups:
+        print("No tag groups need governance.")
+        return
+    print("Tag Groups")
+    print("----------")
+    for group in groups:
+        variants = ", ".join(f"{tag} ({count})" for tag, count in group["variants"])
+        print(f"{group['canonical']}  total={group['total_count']}")
+        print(f"  variants: {variants}")
+
+
+def tags_merge(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    affected = merge_tags(settings.resolved_database_path, canonical=args.canonical, aliases=args.aliases)
+    print(f"Merged {len(args.aliases)} alias(es) into '{args.canonical}'. Updated {affected} document(s).")
+
+
+def tags_aliases(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    aliases = list_tag_aliases(settings.resolved_database_path, limit=args.limit)
+    if not aliases:
+        print("No merged tag aliases found.")
+        return
+    print("Tag Aliases")
+    print("-----------")
+    for item in aliases:
+        print(f"{item['alias']} -> {item['canonical']}  {item['created_at']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Personal AI Knowledge Butler CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -309,6 +342,21 @@ def build_parser() -> argparse.ArgumentParser:
     tasks_delete_parser = tasks_subparsers.add_parser("delete", help="Delete a task.")
     tasks_delete_parser.add_argument("id", type=int, help="Task ID.")
     tasks_delete_parser.set_defaults(func=tasks_delete)
+
+    tags_parser = subparsers.add_parser("tags", help="Manage tag normalization and alias merges.")
+    tags_subparsers = tags_parser.add_subparsers(dest="tags_command", required=True)
+
+    tags_groups_parser = tags_subparsers.add_parser("groups", help="List candidate tag merge groups.")
+    tags_groups_parser.set_defaults(func=tags_groups)
+
+    tags_merge_parser = tags_subparsers.add_parser("merge", help="Merge aliases into one canonical tag.")
+    tags_merge_parser.add_argument("--canonical", required=True, help="Canonical tag name to keep.")
+    tags_merge_parser.add_argument("aliases", nargs="+", help="Alias tag values to replace.")
+    tags_merge_parser.set_defaults(func=tags_merge)
+
+    tags_aliases_parser = tags_subparsers.add_parser("aliases", help="List merge alias history.")
+    tags_aliases_parser.add_argument("--limit", type=int, default=100, help="Maximum number of alias rows.")
+    tags_aliases_parser.set_defaults(func=tags_aliases)
 
     return parser
 
