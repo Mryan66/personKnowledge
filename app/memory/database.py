@@ -73,6 +73,18 @@ CREATE TABLE IF NOT EXISTS search_history (
     result_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS review_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period TEXT NOT NULL,
+    triggered_by TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    document_count INTEGER,
+    output_path TEXT,
+    error_message TEXT
+);
 """
 
 
@@ -1167,3 +1179,119 @@ def list_search_history(database_path: Path, limit: int = 20) -> List[dict]:
         }
         for row in rows
     ]
+
+
+def record_review_run(
+    database_path: Path,
+    period: str,
+    triggered_by: str,
+    started_at: str,
+    finished_at: Optional[str],
+    status: str,
+    document_count: Optional[int],
+    output_path: Optional[str],
+    error_message: Optional[str],
+) -> int:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO review_runs (
+                    period,
+                    triggered_by,
+                    started_at,
+                    finished_at,
+                    status,
+                    document_count,
+                    output_path,
+                    error_message
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    period,
+                    triggered_by,
+                    started_at,
+                    finished_at,
+                    status,
+                    document_count,
+                    output_path,
+                    error_message,
+                ),
+            )
+        return cursor.lastrowid
+
+
+def list_recent_review_runs(database_path: Path, limit: int = 10) -> List[dict]:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                id,
+                period,
+                triggered_by,
+                started_at,
+                finished_at,
+                status,
+                document_count,
+                output_path,
+                error_message
+            FROM review_runs
+            ORDER BY started_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "period": row[1],
+            "triggered_by": row[2],
+            "started_at": row[3],
+            "finished_at": row[4] or "",
+            "status": row[5],
+            "document_count": row[6],
+            "output_path": row[7] or "",
+            "error_message": row[8] or "",
+        }
+        for row in rows
+    ]
+
+
+def get_last_review_run(database_path: Path, period: str) -> Optional[dict]:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                id,
+                period,
+                triggered_by,
+                started_at,
+                finished_at,
+                status,
+                document_count,
+                output_path,
+                error_message
+            FROM review_runs
+            WHERE period = ?
+            ORDER BY started_at DESC, id DESC
+            LIMIT 1
+            """,
+            (period,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row[0],
+        "period": row[1],
+        "triggered_by": row[2],
+        "started_at": row[3],
+        "finished_at": row[4] or "",
+        "status": row[5],
+        "document_count": row[6],
+        "output_path": row[7] or "",
+        "error_message": row[8] or "",
+    }

@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from mimetypes import guess_type
 from pathlib import Path
@@ -24,6 +25,7 @@ from app.memory.database import (
     list_all_tags,
     list_chat_messages,
     list_chat_sessions,
+    record_review_run,
     list_chunks,
     list_search_history,
     list_similar_documents,
@@ -701,6 +703,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         period = form.get("period", ["daily"])[0]
         write_file = form.get("write_file", [""])[0] == "1"
         review_agent = ReviewAgent(settings.resolved_database_path, settings.resolved_knowledge_dir / "reviews")
+        started_at = datetime.now(timezone.utc).isoformat()
         try:
             if period == "weekly":
                 report = review_agent.generate_weekly_review(limit=limit, write_file=write_file)
@@ -711,9 +714,31 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             else:
                 report = review_agent.generate_daily_review(limit=limit, write_file=write_file)
                 message = "已生成日复盘。"
+            record_review_run(
+                settings.resolved_database_path,
+                period=period,
+                triggered_by="web",
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                status="success",
+                document_count=report.body.count("- **"),
+                output_path=str(report.path) if report.path else "",
+                error_message="",
+            )
         except Exception as error:
             report = None
             message = f"复盘生成失败：{error}。请稍后重试。"
+            record_review_run(
+                settings.resolved_database_path,
+                period=period,
+                triggered_by="web",
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                status="failed",
+                document_count=None,
+                output_path="",
+                error_message=str(error),
+            )
         self._send_html(
             render_review(
                 settings,

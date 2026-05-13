@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -8,7 +9,7 @@ from app.agents.review_agent import ReviewAgent
 from app.config import get_settings
 from app.ingest.pipeline import ingest_path
 from app.ingest.scanner import scan_inbox
-from app.memory.database import initialize_database
+from app.memory.database import initialize_database, record_review_run
 from app.tools.embedding_tool import EmbeddingTool
 from app.tools.openai_client import OpenAIClient
 from app.tools.search_tool import SearchTool
@@ -159,10 +160,45 @@ def review(args: argparse.Namespace) -> None:
         settings.resolved_database_path,
         settings.resolved_knowledge_dir / "reviews",
     )
-    report = review_agent.generate_daily_review(limit=args.limit, write_file=not args.no_write)
-    print(report.body)
-    if report.path:
-        print(f"Review written to: {report.path}")
+    started_at = datetime.now(timezone.utc).isoformat()
+    report = None
+    try:
+        if args.period == "weekly":
+            report = review_agent.generate_weekly_review(limit=args.limit, write_file=not args.no_write)
+        elif args.period == "monthly":
+            report = review_agent.generate_monthly_review(limit=args.limit, write_file=not args.no_write)
+        else:
+            report = review_agent.generate_daily_review(limit=args.limit, write_file=not args.no_write)
+        finished_at = datetime.now(timezone.utc).isoformat()
+        document_count = report.body.count("- **")
+        record_review_run(
+            settings.resolved_database_path,
+            period=args.period,
+            triggered_by=args.triggered_by,
+            started_at=started_at,
+            finished_at=finished_at,
+            status="success",
+            document_count=document_count,
+            output_path=str(report.path) if report.path else "",
+            error_message="",
+        )
+        print(report.body)
+        if report.path:
+            print(f"Review written to: {report.path}")
+    except Exception as error:
+        finished_at = datetime.now(timezone.utc).isoformat()
+        record_review_run(
+            settings.resolved_database_path,
+            period=args.period,
+            triggered_by=args.triggered_by,
+            started_at=started_at,
+            finished_at=finished_at,
+            status="failed",
+            document_count=None,
+            output_path="",
+            error_message=str(error),
+        )
+        raise
 
 
 def web(args: argparse.Namespace) -> None:
@@ -207,7 +243,9 @@ def build_parser() -> argparse.ArgumentParser:
     web_parser.set_defaults(func=web)
 
     review_parser = subparsers.add_parser("review", help="Generate a daily knowledge review markdown report.")
+    review_parser.add_argument("--period", choices=["daily", "weekly", "monthly"], default="daily", help="Review period.")
     review_parser.add_argument("--limit", type=int, default=20, help="Maximum number of recent documents.")
+    review_parser.add_argument("--triggered-by", choices=["cli", "auto", "web"], default="cli", help="Record how this review run was triggered.")
     review_parser.add_argument("--no-write", action="store_true", help="Print only; do not write a review file.")
     review_parser.set_defaults(func=review)
 

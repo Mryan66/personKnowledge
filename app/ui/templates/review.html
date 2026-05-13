@@ -10,11 +10,7 @@
         <h1>知识复盘</h1>
         <p>用 10 秒钟回顾最近知识变化，快速看到主题和下一步建议。</p>
       </div>
-      <div class="status-panel">
-        <div><span>Review 目录</span><strong>{{ reviews_dir }}</strong></div>
-        <div><span>历史数量</span><strong>{{ review_count }}</strong></div>
-        <div><span>最近 Review</span><strong>{{ latest_review }}</strong></div>
-      </div>
+      <div class="status-panel">{{ hero_status_items | safe }}</div>
     </header>
 
     <section class="panel">
@@ -40,6 +36,7 @@
     </section>
 
     {{ report_panel | safe }}
+    {{ review_runs_panel | safe }}
     {{ selected_review_panel | safe }}
 
     <section class="panel">

@@ -1,10 +1,11 @@
 from html import escape
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 from urllib.parse import quote
 
 from app.agents.review_agent import ReviewReport
 from app.config import Settings
+from app.memory.database import get_last_review_run, list_recent_review_runs
 from app.ui.rendering import render_template
 
 
@@ -27,6 +28,7 @@ def render_review(
     message: str = "",
 ) -> str:
     reviews_dir = settings.resolved_knowledge_dir / "reviews"
+    review_runs = list_recent_review_runs(settings.resolved_database_path, limit=10)
     context = {
         "app_name": settings.app_name,
         "active_nav": "review",
@@ -39,7 +41,9 @@ def render_review(
         "reviews_dir": escape(str(reviews_dir)),
         "review_count": str(len(list_review_files(reviews_dir))),
         "latest_review": escape(get_latest_review_name(reviews_dir)),
+        "hero_status_items": render_review_hero_status(settings),
         "report_panel": render_report_panel(report, message),
+        "review_runs_panel": render_review_runs_panel(review_runs),
         "history_list": render_history_list(reviews_dir, selected_review),
         "selected_review_panel": render_selected_review_panel(selected_review, selected_body),
     }
@@ -120,6 +124,69 @@ def render_selected_review_panel(selected_review: str, selected_body: str) -> st
         f'<pre class="markdown-preview">{escape(selected_body)}</pre>'
         '</section>'
     )
+
+
+def render_review_runs_panel(runs: List[dict]) -> str:
+    items = []
+    if not runs:
+        items.append('<li class="muted">暂无自动或手动复盘运行记录。</li>')
+    for run in runs:
+        status_label = "成功" if run["status"] == "success" else "失败"
+        period_label = REVIEW_PERIODS.get(run["period"], run["period"])
+        trigger_label = {"cli": "CLI", "auto": "自动", "web": "Web"}.get(run["triggered_by"], run["triggered_by"])
+        output_html = ""
+        if run["output_path"]:
+            output_name = Path(run["output_path"]).name
+            output_html = f' <a class="filter-chip" href="/review?file={quote(output_name)}">{escape(output_name)}</a>'
+        detail_parts = [
+            f'<span class="filter-chip">{escape(period_label)}</span>',
+            f'<span class="filter-chip">{escape(trigger_label)}</span>',
+            f'<span class="filter-chip">{escape(status_label)}</span>',
+            f'<span class="filter-chip">文档 {run["document_count"] if run["document_count"] is not None else "-"}</span>',
+        ]
+        description = "".join(detail_parts)
+        if output_html:
+            description += output_html
+        if run["error_message"]:
+            description += f'<span class="muted">错误：{escape(run["error_message"])}</span>'
+        items.append(
+            "<li>"
+            f"<strong>{escape(format_run_time(run['finished_at'] or run['started_at']))}</strong>"
+            f"<div>{description}</div>"
+            "</li>"
+        )
+    return (
+        '<section class="panel">'
+        '<div class="panel-heading"><h2>运行历史</h2><p>最近 10 次自动或手动复盘的执行情况。</p></div>'
+        f'<ul class="status-list">{"".join(items)}</ul>'
+        '</section>'
+    )
+
+
+def render_review_hero_status(settings: Settings) -> str:
+    items = [
+        build_hero_status_item("Review 目录", str(settings.resolved_knowledge_dir / "reviews")),
+        build_hero_status_item("历史数量", str(len(list_review_files(settings.resolved_knowledge_dir / "reviews")))),
+        build_hero_status_item("最近 Review", get_latest_review_name(settings.resolved_knowledge_dir / "reviews")),
+    ]
+    for period in ("daily", "weekly", "monthly"):
+        run = get_last_review_run(settings.resolved_database_path, period)
+        value = "未运行"
+        if run and run["status"] == "success":
+            value = format_run_time(run["finished_at"] or run["started_at"])
+        items.append(build_hero_status_item(f"{REVIEW_PERIODS[period]}上次成功", value))
+    return "".join(items)
+
+
+def build_hero_status_item(label: str, value: str) -> str:
+    return f"<div><span>{escape(label)}</span><strong>{escape(value)}</strong></div>"
+
+
+def format_run_time(value: str) -> str:
+    if not value:
+        return "-"
+    normalized = value.replace("T", " ").replace("+00:00", " UTC")
+    return normalized
 
 
 def format_size(size: int) -> str:

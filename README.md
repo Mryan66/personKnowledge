@@ -93,6 +93,18 @@ python3 -m app.cli ask "我有哪些关于 AI 的笔记？"
 python3 -m app.cli review --limit 20
 ```
 
+## 自动定时复盘
+
+macOS 下推荐使用 `launchd` 定时执行：
+
+```bash
+python3 -m app.cli review --period daily --triggered-by auto
+```
+
+完整配置说明和 `plist` 模板见：
+
+- `docs/scheduling-macos.md`
+
 ### 启动 Web UI
 
 ```bash
