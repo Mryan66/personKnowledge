@@ -66,6 +66,17 @@
                 <button type="button" class="tag-chip ask-chip-button" @click="fillPrompt('这些资料里下一步最值得补什么？')">下一步</button>
               </div>
               <details class="advanced-settings">
+                <summary>写作模板</summary>
+                <div class="chip-row compact-chip-row">
+                  <button type="button" class="tag-chip ask-chip-button" @click="fillPrompt('基于知识库写一篇关于【请填主题】的博客大纲，要求：1) 给出 3-5 个章节；2) 每章节列要点；3) 末尾给出可引用的关键来源。')">📝 博客大纲</button>
+                  <button type="button" class="tag-chip ask-chip-button" @click="fillPrompt('基于最近一周的知识库内容，生成一份周报，结构：本周亮点 / 核心结论 / 待办事项 / 下周计划。')">📊 周报</button>
+                  <button type="button" class="tag-chip ask-chip-button" @click="fillPrompt('基于知识库，为我生成关于【请填主题】的学习路线，要求：1) 由浅入深 5 个阶段；2) 每阶段推荐知识库内的相关资料；3) 给出可量化的学习产出。')">🎓 学习路线</button>
+                  <button type="button" class="tag-chip ask-chip-button" @click="fillPrompt('基于知识库，帮我对【请填主题】做一次需求分析，输出：背景 / 目标用户 / 核心需求 / 非功能需求 / 风险与依赖 / 关键里程碑。')">📋 需求分析</button>
+                  <button type="button" class="tag-chip ask-chip-button" @click="fillPrompt('基于知识库，给【请填主题】生成一份演示文稿大纲，每页一个 slide，给出标题 + 3 个要点。')">🎤 演示大纲</button>
+                  <button type="button" class="tag-chip ask-chip-button" @click="fillPrompt('对比知识库里关于【主题 A】和【主题 B】的内容，输出对比表格：维度 / A 立场 / B 立场 / 我的见解。')">⚖️ 主题对比</button>
+                </div>
+              </details>
+              <details class="advanced-settings">
                 <summary>高级设置</summary>
                 <div class="ask-options">
                   <label>
