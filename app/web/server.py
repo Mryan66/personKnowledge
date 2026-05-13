@@ -175,7 +175,9 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 organizer_agent=organizer_agent,
                 enable_ocr=settings.enable_ocr,
             )
-            message = f"已处理路径：{target}"
+            new_count = sum(1 for result in batch.successes if result.status != "duplicate")
+            duplicate_count = sum(1 for result in batch.successes if result.status == "duplicate")
+            message = f"已处理路径：{target}。{new_count} 个新增，{duplicate_count} 个重复跳过。"
         except (DocumentParseError, OSError, ValueError, OpenAIClientError) as error:
             batch = None
             message = f"导入失败：{error}"
@@ -588,6 +590,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 embedding_tool=build_embedding_tool(settings),
                 organizer_agent=build_organizer_agent(settings),
                 enable_ocr=settings.enable_ocr,
+                force=True,
             )
             message = f"已重新导入：{result.title}"
         except (DocumentParseError, OSError, ValueError, OpenAIClientError) as error:
@@ -650,6 +653,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                     embedding_tool=build_embedding_tool(settings),
                     organizer_agent=build_organizer_agent(settings),
                     enable_ocr=settings.enable_ocr,
+                    force=True,
                 )
                 success_count += 1
             except (DocumentParseError, OSError, ValueError, OpenAIClientError):

@@ -6,7 +6,14 @@ from app.agents.organizer_agent import OrganizerAgent
 from app.ingest.chunker import chunk_text
 from app.ingest.parser import DocumentParseError, UnsupportedFileTypeError, parse_document
 from app.ingest.scanner import scan_inbox
-from app.memory.database import compute_file_hash, find_document_by_hash, list_potential_duplicates, upsert_document
+from app.memory.database import (
+    compute_content_hash,
+    compute_file_hash,
+    find_document_by_content_hash,
+    get_document,
+    list_potential_duplicates,
+    upsert_document,
+)
 from app.tools.embedding_tool import EmbeddingTool
 from app.tools.openai_client import OpenAIClientError
 
@@ -59,10 +66,18 @@ def ingest_file(
     embedding_tool: Optional[EmbeddingTool] = None,
     organizer_agent: Optional[OrganizerAgent] = None,
     enable_ocr: bool = False,
+    force: bool = False,
 ) -> IngestResult:
     file_hash = compute_file_hash(path)
-    existing = find_document_by_hash(database_path, file_hash)
-    if existing and Path(existing.source_path) != path:
+    content = parse_document(path, enable_ocr=enable_ocr)
+    if not content:
+        raise DocumentParseError(
+            f"Document has no extractable text: {path}. If this is a scanned PDF, OCR is required."
+        )
+    content_hash = compute_content_hash(content)
+    existing = find_document_by_content_hash(database_path, content_hash)
+    current_document = get_document(database_path, path)
+    if existing and not force and (current_document is None or existing.id != current_document.id):
         return IngestResult(
             source_path=path,
             document_id=existing.id,
@@ -76,19 +91,19 @@ def ingest_file(
             duplicate_of_document_id=existing.id,
         )
 
-    content = parse_document(path, enable_ocr=enable_ocr)
-    if not content:
-        raise DocumentParseError(
-            f"Document has no extractable text: {path}. If this is a scanned PDF, OCR is required."
-        )
-
     organizer = organizer_agent or OrganizerAgent()
     organization = organizer.organize(path, content)
     chunks = chunk_text(content)
+    existing_document_id = None
+    if force and existing:
+        existing_document_id = existing.id
+    elif current_document is not None:
+        existing_document_id = current_document.id
     document_id = upsert_document(
         database_path=database_path,
         source_path=path,
         file_hash=file_hash,
+        content_hash=content_hash,
         title=organization.title,
         summary=organization.summary,
         tags=organization.tags,
@@ -99,6 +114,7 @@ def ingest_file(
         organizations=organization.organizations,
         source_url=organization.source_url,
         chunks=chunks,
+        existing_document_id=existing_document_id,
     )
     embedding_count = 0
     if embedding_tool:
@@ -125,6 +141,7 @@ def ingest_path(
     embedding_tool: Optional[EmbeddingTool] = None,
     organizer_agent: Optional[OrganizerAgent] = None,
     enable_ocr: bool = False,
+    force: bool = False,
 ) -> IngestBatchResult:
     successes = []
     failures = []
@@ -137,6 +154,7 @@ def ingest_path(
                     embedding_tool=embedding_tool,
                     organizer_agent=organizer_agent,
                     enable_ocr=enable_ocr,
+                    force=force,
                 )
             )
         except UnsupportedFileTypeError:

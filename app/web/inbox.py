@@ -110,12 +110,17 @@ def render_getting_started_panel(settings: Settings, files) -> str:
 
 
 def build_batch_summary(batch: IngestBatchResult) -> str:
-    success_count = len(batch.successes)
+    success_count = sum(1 for result in batch.successes if getattr(result, "status", "") != "duplicate")
+    duplicate_count = sum(1 for result in batch.successes if getattr(result, "status", "") == "duplicate")
     failure_count = len(batch.failures)
     if success_count and not failure_count:
-        return f"导入完成，已新增 {success_count} 篇知识。现在你可以去搜索，或者直接向 AI 提问。"
+        return f"导入完成，已新增 {success_count} 篇知识，重复跳过 {duplicate_count} 篇。现在你可以去搜索，或者直接向 AI 提问。"
     if success_count and failure_count:
-        return f"本次导入成功 {success_count} 篇，失败 {failure_count} 篇。你可以先继续使用成功导入的内容，再查看失败原因。"
+        return f"本次导入新增 {success_count} 篇，重复跳过 {duplicate_count} 篇，失败 {failure_count} 篇。你可以先继续使用成功导入的内容，再查看失败原因。"
+    if duplicate_count and not failure_count:
+        return f"本次导入没有新增内容，重复跳过 {duplicate_count} 篇。"
+    if duplicate_count and failure_count:
+        return f"本次导入没有新增内容，重复跳过 {duplicate_count} 篇，失败 {failure_count} 篇。"
     if failure_count:
         return f"这次导入没有成功，失败 {failure_count} 项。请先根据下方原因调整后重试。"
     return ""

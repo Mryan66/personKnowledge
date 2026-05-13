@@ -70,6 +70,7 @@ def ingest(args: argparse.Namespace) -> None:
         settings.resolved_database_path,
         embedding_tool=embedding_tool,
         organizer_agent=build_organizer_agent(settings),
+        force=args.force,
     )
     if not batch.successes and not batch.failures:
         print(f"No supported documents ingested from: {target}")
@@ -86,12 +87,17 @@ def ingest(args: argparse.Namespace) -> None:
         print(f"  tags: {tag_text}")
         print(f"  chunks: {result.chunk_count}")
         print(f"  embeddings: {result.embedding_count}")
+        print(f"  status: {result.status}")
     if batch.failures:
         print("Failed Documents")
         print("----------------")
         for failure in batch.failures:
             print(f"- {failure.source_path}: {failure.reason}")
-    print(f"Ingested {len(batch.successes)} document(s), failed {len(batch.failures)} document(s).")
+    new_count = sum(1 for result in batch.successes if result.status != "duplicate")
+    duplicate_count = sum(1 for result in batch.successes if result.status == "duplicate")
+    print(
+        f"Ingested {len(batch.successes)} document(s), new {new_count}, duplicate skipped {duplicate_count}, failed {len(batch.failures)} document(s)."
+    )
 
 
 def search(args: argparse.Namespace) -> None:
@@ -176,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser = subparsers.add_parser("ingest", help="Placeholder for document ingestion.")
     ingest_parser.add_argument("path", nargs="?", help="Optional file or folder to ingest.")
     ingest_parser.add_argument("--no-embeddings", action="store_true", help="Skip OpenAI embedding generation during ingest.")
+    ingest_parser.add_argument("--force", action="store_true", help="Reprocess even when normalized content already exists.")
     ingest_parser.set_defaults(func=ingest)
 
     search_parser = subparsers.add_parser("search", help="Search ingested knowledge with keywords.")

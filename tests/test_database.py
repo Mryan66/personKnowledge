@@ -5,10 +5,13 @@ from tempfile import TemporaryDirectory
 
 from app.memory.database import (
     add_chat_message,
+    compute_content_hash,
     compute_file_hash,
+    count_documents,
     create_chat_session,
     delete_document,
     ensure_document_columns,
+    find_document_by_content_hash,
     find_document_by_hash,
     get_latest_assistant_message,
     get_document_by_id,
@@ -51,6 +54,7 @@ class DatabaseTests(unittest.TestCase):
                 database_path,
                 source_path=file_path,
                 file_hash=compute_file_hash(file_path),
+                content_hash="content-hash-1",
                 title="原始标题",
                 summary="原始摘要",
                 tags=["one"],
@@ -88,6 +92,7 @@ class DatabaseTests(unittest.TestCase):
                 database_path,
                 source_path=root / "target.md",
                 file_hash="hash-target",
+                content_hash="content-hash-target",
                 title="RAG 方案",
                 summary="关于 agent 与 memory 的总结",
                 tags=["rag", "agent", "memory"],
@@ -98,6 +103,7 @@ class DatabaseTests(unittest.TestCase):
                 database_path,
                 source_path=root / "close.md",
                 file_hash="hash-close",
+                content_hash="content-hash-close",
                 title="Agent Memory 实践",
                 summary="RAG 与 memory 的组合",
                 tags=["rag", "memory"],
@@ -108,6 +114,7 @@ class DatabaseTests(unittest.TestCase):
                 database_path,
                 source_path=root / "far.md",
                 file_hash="hash-far",
+                content_hash="content-hash-far",
                 title="旅游清单",
                 summary="周末出行准备",
                 tags=["travel"],
@@ -134,6 +141,7 @@ class DatabaseTests(unittest.TestCase):
                 database_path,
                 source_path=first,
                 file_hash=compute_file_hash(first),
+                content_hash=compute_content_hash(first.read_text(encoding="utf-8")),
                 title="Agent 方案",
                 summary="RAG memory 设计",
                 tags=["rag", "memory"],
@@ -144,6 +152,7 @@ class DatabaseTests(unittest.TestCase):
                 database_path,
                 source_path=second,
                 file_hash=compute_file_hash(second),
+                content_hash=compute_content_hash(second.read_text(encoding="utf-8")),
                 title="Agent 方案实践",
                 summary="RAG memory 设计细节",
                 tags=["rag", "memory"],
@@ -158,6 +167,30 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(found.title, "Agent 方案")
         self.assertEqual(len(duplicates), 1)
         self.assertEqual(duplicates[0]["title"], "Agent 方案实践")
+
+    def test_find_document_by_content_hash(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            note = root / "note.md"
+            note.write_text("# Agent\n\nSame  content", encoding="utf-8")
+            content_hash = compute_content_hash(note.read_text(encoding="utf-8"))
+            upsert_document(
+                database_path,
+                source_path=note,
+                file_hash=compute_file_hash(note),
+                content_hash=content_hash,
+                title="Agent",
+                summary="Same content",
+                tags=[],
+                category="",
+                chunks=["Same content"],
+            )
+
+            found = find_document_by_content_hash(database_path, content_hash)
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found.source_path, str(note))
 
     def test_chat_sessions_and_messages_round_trip(self):
         with TemporaryDirectory() as temporary_directory:
@@ -197,6 +230,60 @@ class DatabaseTests(unittest.TestCase):
 
         self.assertIn("file_hash", columns)
         self.assertIn("people", columns)
+        self.assertIn("content_hash", columns)
+
+    def test_ensure_document_columns_backfills_content_hash(self):
+        with TemporaryDirectory() as temporary_directory:
+            database_path = Path(temporary_directory) / "metadata.sqlite"
+            with sqlite3.connect(database_path) as connection:
+                connection.executescript(
+                    """
+                    CREATE TABLE documents (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source_path TEXT NOT NULL UNIQUE,
+                        file_hash TEXT,
+                        title TEXT,
+                        summary TEXT,
+                        tags TEXT,
+                        category TEXT,
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE chunks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        document_id INTEGER NOT NULL,
+                        chunk_index INTEGER NOT NULL,
+                        content TEXT NOT NULL,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO documents (source_path, file_hash, title, summary, tags, category, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    ("legacy.md", "legacy-file-hash", "Legacy", "Legacy summary", "[]", "notes", "ingested"),
+                )
+                document_id = connection.execute("SELECT id FROM documents").fetchone()[0]
+                connection.execute(
+                    "INSERT INTO chunks (document_id, chunk_index, content) VALUES (?, ?, ?)",
+                    (document_id, 0, " Legacy   Content "),
+                )
+                connection.commit()
+
+            ensure_document_columns(database_path)
+
+            with sqlite3.connect(database_path) as connection:
+                content_hash = connection.execute("SELECT content_hash FROM documents WHERE id = 1").fetchone()[0]
+                index_names = {
+                    row[1]
+                    for row in connection.execute("PRAGMA index_list(documents)").fetchall()
+                }
+
+        self.assertEqual(content_hash, compute_content_hash("Legacy Content"))
+        self.assertIn("idx_documents_content_hash_unique", index_names)
 
 
 if __name__ == "__main__":

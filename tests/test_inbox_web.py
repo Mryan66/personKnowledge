@@ -73,6 +73,22 @@ class InboxWebTests(unittest.TestCase):
         summary = build_batch_summary(batch)
 
         self.assertIn("已新增 1 篇知识", summary)
+        self.assertIn("重复跳过 0 篇", summary)
+
+    def test_render_result_panel_counts_duplicates(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            database_path = root / "metadata.sqlite"
+            first = root / "first.md"
+            second = root / "second.md"
+            content = "# Inbox 测试\n\n同一内容"
+            first.write_text(content, encoding="utf-8")
+            second.write_text(content, encoding="utf-8")
+
+            batch = ingest_path(root, database_path)
+            html = render_result_panel(batch, message="done")
+
+        self.assertIn("1 篇知识，重复跳过 1 篇", html)
 
     def test_render_inbox_page_includes_form_and_table(self):
         with TemporaryDirectory() as temporary_directory:

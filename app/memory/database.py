@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_path TEXT NOT NULL UNIQUE,
     file_hash TEXT,
+    content_hash TEXT,
     title TEXT,
     summary TEXT,
     tags TEXT,
@@ -150,6 +151,7 @@ def upsert_document(
     database_path: Path,
     source_path: Path,
     file_hash: str,
+    content_hash: str,
     title: str,
     summary: str,
     tags: List[str],
@@ -161,53 +163,82 @@ def upsert_document(
     organizations: Optional[List[str]] = None,
     source_url: str = "",
     status: str = "ingested",
+    existing_document_id: Optional[int] = None,
 ) -> int:
     initialize_database(database_path)
     with closing(sqlite3.connect(database_path)) as connection:
         with connection:
             connection.execute("PRAGMA foreign_keys = ON")
-            cursor = connection.execute(
-                """
-                INSERT INTO documents (
-                    source_path, file_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                ON CONFLICT(source_path) DO UPDATE SET
-                    file_hash = excluded.file_hash,
-                    title = excluded.title,
-                    summary = excluded.summary,
-                    tags = excluded.tags,
-                    category = excluded.category,
-                    authors = excluded.authors,
-                    dates = excluded.dates,
-                    people = excluded.people,
-                    organizations = excluded.organizations,
-                    source_url = excluded.source_url,
-                    status = excluded.status,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (
-                    str(source_path),
-                    file_hash,
-                    title,
-                    summary,
-                    json.dumps(tags, ensure_ascii=False),
-                    category,
-                    json.dumps(authors or [], ensure_ascii=False),
-                    json.dumps(dates or [], ensure_ascii=False),
-                    json.dumps(people or [], ensure_ascii=False),
-                    json.dumps(organizations or [], ensure_ascii=False),
-                    source_url,
-                    status,
-                ),
+            payload = (
+                str(source_path),
+                file_hash,
+                content_hash,
+                title,
+                summary,
+                json.dumps(tags, ensure_ascii=False),
+                category,
+                json.dumps(authors or [], ensure_ascii=False),
+                json.dumps(dates or [], ensure_ascii=False),
+                json.dumps(people or [], ensure_ascii=False),
+                json.dumps(organizations or [], ensure_ascii=False),
+                source_url,
+                status,
             )
-            if cursor.lastrowid:
-                document_id = cursor.lastrowid
+            if existing_document_id is not None:
+                connection.execute(
+                    """
+                    UPDATE documents
+                    SET
+                        source_path = ?,
+                        file_hash = ?,
+                        content_hash = ?,
+                        title = ?,
+                        summary = ?,
+                        tags = ?,
+                        category = ?,
+                        authors = ?,
+                        dates = ?,
+                        people = ?,
+                        organizations = ?,
+                        source_url = ?,
+                        status = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    payload + (existing_document_id,),
+                )
+                document_id = existing_document_id
             else:
-                document_id = connection.execute(
-                    "SELECT id FROM documents WHERE source_path = ?",
-                    (str(source_path),),
-                ).fetchone()[0]
+                cursor = connection.execute(
+                    """
+                    INSERT INTO documents (
+                        source_path, file_hash, content_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(source_path) DO UPDATE SET
+                        file_hash = excluded.file_hash,
+                        content_hash = excluded.content_hash,
+                        title = excluded.title,
+                        summary = excluded.summary,
+                        tags = excluded.tags,
+                        category = excluded.category,
+                        authors = excluded.authors,
+                        dates = excluded.dates,
+                        people = excluded.people,
+                        organizations = excluded.organizations,
+                        source_url = excluded.source_url,
+                        status = excluded.status,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    payload,
+                )
+                if cursor.lastrowid:
+                    document_id = cursor.lastrowid
+                else:
+                    document_id = connection.execute(
+                        "SELECT id FROM documents WHERE source_path = ?",
+                        (str(source_path),),
+                    ).fetchone()[0]
 
             connection.execute("DELETE FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE document_id = ?)", (document_id,))
             connection.execute("DELETE FROM chunks WHERE document_id = ?", (document_id,))
@@ -878,12 +909,14 @@ def ensure_document_columns(database_path: Path) -> None:
         column_names = {row[1] for row in rows}
         additions = {
             "file_hash": "TEXT",
+            "content_hash": "TEXT",
             "authors": "TEXT",
             "dates": "TEXT",
             "people": "TEXT",
             "organizations": "TEXT",
             "source_url": "TEXT",
         }
+        added_content_hash = False
         with connection:
             for column_name, column_type in additions.items():
                 if column_name in column_names:
@@ -891,11 +924,19 @@ def ensure_document_columns(database_path: Path) -> None:
                 try:
                     connection.execute(f"ALTER TABLE documents ADD COLUMN {column_name} {column_type}")
                     column_names.add(column_name)
+                    if column_name == "content_hash":
+                        added_content_hash = True
                 except sqlite3.OperationalError as error:
                     if "duplicate column name" not in str(error).lower():
                         raise
                     refreshed_rows = connection.execute("PRAGMA table_info(documents)").fetchall()
                     column_names = {row[1] for row in refreshed_rows}
+            if "content_hash" in column_names:
+                if added_content_hash:
+                    _backfill_content_hashes(connection)
+                connection.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_documents_content_hash_unique ON documents(content_hash)"
+                )
 
 
 def compute_file_hash(path: Path) -> str:
@@ -924,6 +965,38 @@ def find_document_by_hash(database_path: Path, file_hash: str) -> Optional[Docum
     return _document_from_row(row)
 
 
+def normalize_document_text(content: str) -> str:
+    return re.sub(r"\s+", " ", (content or "").strip()).lower()
+
+
+def compute_content_hash(content: str) -> str:
+    return hashlib.sha256(normalize_document_text(content).encode("utf-8")).hexdigest()
+
+
+def find_document_by_content_hash(database_path: Path, content_hash: str) -> Optional[DocumentRecord]:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        row = connection.execute(
+            """
+            SELECT id, source_path, file_hash, title, summary, tags, category, authors, dates, people, organizations, source_url, status
+            FROM documents
+            WHERE content_hash = ?
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (content_hash,),
+        ).fetchone()
+    if row is None:
+        return None
+    return _document_from_row(row)
+
+
+def count_documents(database_path: Path) -> int:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        return connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+
+
 def list_potential_duplicates(database_path: Path, document_id: int, limit: int = 5) -> List[dict]:
     target = get_document_by_id(database_path, document_id)
     if target is None:
@@ -947,6 +1020,31 @@ def list_potential_duplicates(database_path: Path, document_id: int, limit: int 
             scored.append(enriched)
     scored.sort(key=lambda item: (-item["duplicate_signal"], -item["similarity_score"], item["title"], item["id"]))
     return scored[:limit]
+
+
+def _backfill_content_hashes(connection: sqlite3.Connection) -> None:
+    rows = connection.execute(
+        """
+        SELECT d.id, GROUP_CONCAT(c.content, char(10))
+        FROM documents d
+        LEFT JOIN chunks c ON c.document_id = d.id
+        GROUP BY d.id
+        ORDER BY d.id ASC
+        """
+    ).fetchall()
+    seen_hashes = set()
+    for document_id, content in rows:
+        normalized = normalize_document_text(content or "")
+        if not normalized:
+            continue
+        content_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+        if content_hash in seen_hashes:
+            continue
+        connection.execute(
+            "UPDATE documents SET content_hash = ? WHERE id = ?",
+            (content_hash, document_id),
+        )
+        seen_hashes.add(content_hash)
 
 
 def get_document_growth_stats(database_path: Path, days: int = 30) -> List[dict]:
