@@ -33,7 +33,15 @@ from app.tools.openai_client import OpenAIClient, OpenAIClientError
 from app.web.dashboard import render_dashboard
 from app.web.inbox import render_inbox
 from app.web.knowledge import render_document_preview, render_knowledge
-from app.web.ask import render_ask, render_answer_panel, render_chat_status_bar, render_conversation_panel, render_session_history_drawer
+from app.web.ask import (
+    render_ask,
+    render_answer_panel,
+    render_chat_message,
+    render_chat_status_bar,
+    render_conversation_panel,
+    render_save_note_notice,
+    render_session_history_drawer,
+)
 from app.web.review import read_review_file, render_review
 from app.web.search import render_search
 from app.web.settings import render_settings
@@ -462,6 +470,33 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             ]
         )
         note_path.write_text(body, encoding="utf-8")
+        note_result = None
+        action_notice = ""
+        try:
+            note_result = ingest_file(
+                note_path,
+                settings.resolved_database_path,
+                embedding_tool=build_embedding_tool(settings),
+                organizer_agent=OrganizerAgent(),
+                enable_ocr=settings.enable_ocr,
+            )
+            message = f"已保存并加入知识库：{note_path.name}"
+            if note_result.status == "duplicate":
+                message = f"已保存为笔记：{note_path.name}。检测到与已有文档重复，已复用原条目。"
+            elif note_result.status == "similar":
+                message = f"已保存并加入知识库：{note_path.name}。系统还发现了相似文档。"
+            action_notice = render_save_note_notice(
+                note_name=note_path.name,
+                note_path=str(note_path),
+                document_id=str(note_result.document_id),
+            )
+        except (DocumentParseError, OSError, ValueError, OpenAIClientError) as error:
+            message = f"笔记已保存到文件：{note_path.name}，但加入知识库失败：{error}"
+            action_notice = render_save_note_notice(
+                note_name=note_path.name,
+                note_path=str(note_path),
+                document_id="",
+            )
         sessions = list_chat_sessions(settings.resolved_database_path, limit=20)
         messages = list_chat_messages(settings.resolved_database_path, int(session_id), limit=100)
         self._send_html(
@@ -471,7 +506,8 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 session_id=session_id,
                 sessions=sessions,
                 messages=messages,
-                message=f"已保存为笔记：{note_path.name}",
+                message=message,
+                action_notice=action_notice,
             )
         )
 
@@ -727,35 +763,55 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         self.wfile.write(f"data: {body}\n\n".encode("utf-8"))
         self.wfile.flush()
 
-    def _send_sse_patch(self, settings, ask_state: dict, include_answer: bool = True) -> None:
-        self._send_sse_event(
-            "patch",
-            {
-                "status_bar": render_chat_status_bar(
-                    openai_status="已配置" if settings.openai_api_key else "未配置",
-                    openai_status_class="status-ok" if settings.openai_api_key else "status-warn",
-                    answer_mode=ask_state["answer"].mode if ask_state["answer"] else "处理中",
-                    answer_confidence=ask_state["answer"].confidence if ask_state["answer"] else "-",
-                ),
-                "session_drawer": render_session_history_drawer(ask_state["sessions"], ask_state["session_id"]),
+    def _send_sse_patch(self, settings, ask_state: dict, include_answer: bool = True, include_static_regions: bool = True) -> None:
+        payload = {
                 "conversation": render_conversation_panel(
                     ask_state["messages"],
                     answer=ask_state["answer"],
                     message=ask_state["message"],
-                ),
-                "answer": render_answer_panel(
-                    ask_state["answer"] if include_answer else None,
-                    ask_state["message"],
                     session_id=ask_state["session_id"],
-                    question=ask_state["question"],
-                    search_mode=ask_state["search_mode"],
-                    limit=ask_state["limit"],
-                    use_llm=ask_state["use_llm"],
-                    use_embeddings=ask_state["use_embeddings"],
-                    model=ask_state["model"],
-                    answer_style=ask_state["answer_style"],
-                    answer_state=ask_state["answer_state"],
                 ),
+            "answer": render_answer_panel(
+                ask_state["answer"] if include_answer else None,
+                ask_state["message"],
+                session_id=ask_state["session_id"],
+                question=ask_state["question"],
+                search_mode=ask_state["search_mode"],
+                limit=ask_state["limit"],
+                use_llm=ask_state["use_llm"],
+                use_embeddings=ask_state["use_embeddings"],
+                model=ask_state["model"],
+                answer_style=ask_state["answer_style"],
+                answer_state=ask_state["answer_state"],
+            ),
+        }
+        if include_static_regions:
+            payload.update(
+                {
+                    "status_bar": render_chat_status_bar(
+                        openai_status="已配置" if settings.openai_api_key else "未配置",
+                        openai_status_class="status-ok" if settings.openai_api_key else "status-warn",
+                        answer_mode=ask_state["answer"].mode if ask_state["answer"] else "处理中",
+                        answer_confidence=ask_state["answer"].confidence if ask_state["answer"] else "-",
+                    ),
+                    "session_drawer": render_session_history_drawer(ask_state["sessions"], ask_state["session_id"]),
+                }
+            )
+        self._send_sse_event("patch", payload)
+
+    def _send_sse_stream_delta(self, content: str) -> None:
+        self._send_sse_event(
+            "stream_delta",
+            {
+                "content": content,
+            },
+        )
+
+    def _send_sse_stream_start(self, content: str = "") -> None:
+        self._send_sse_event(
+            "stream_start",
+            {
+                "html": render_chat_message("assistant", content, "处理中", streaming=True),
             },
         )
 
@@ -835,6 +891,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 "answer_state": "streaming",
             },
             include_answer=False,
+            include_static_regions=True,
         )
 
         try:
@@ -848,29 +905,10 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 answer_style=answer_style,
             )
             self._send_sse_event("phase", {"label": "正在生成最终回答..."})
-            partial_answer_box = {"value": None}
+            self._send_sse_stream_start("")
 
             def push_partial_answer(partial_answer: Answer) -> None:
-                partial_answer_box["value"] = partial_answer
-                self._send_sse_patch(
-                    settings,
-                    {
-                        "question": question,
-                        "search_mode": search_mode,
-                        "limit": limit,
-                        "use_llm": use_llm,
-                        "use_embeddings": use_embeddings,
-                        "model": model,
-                        "answer_style": answer_style,
-                        "session_id": session_id,
-                        "sessions": list_chat_sessions(settings.resolved_database_path, limit=20),
-                        "messages": build_streaming_messages(user_messages, partial_answer),
-                        "answer": partial_answer,
-                        "message": "正在生成最终回答...",
-                        "answer_state": "streaming",
-                    },
-                    include_answer=False,
-                )
+                self._send_sse_stream_delta(partial_answer.text)
 
             answer = query_agent.stream_answer(question, on_delta=push_partial_answer, limit=limit, history=history)
             add_chat_message(settings.resolved_database_path, int(session_id), "assistant", answer.text, sources=answer.sources, style=answer_style)
@@ -891,7 +929,7 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 "message": message,
                 "answer_state": answer_state,
             }
-            self._send_sse_patch(settings, final_state, include_answer=True)
+            self._send_sse_patch(settings, final_state, include_answer=True, include_static_regions=True)
             self._send_sse_event("done", {"session_id": session_id, "redirect": f"/ask?{urlencode({'session_id': session_id})}"})
         except OpenAIClientError as error:
             self._send_sse_event("error", {"message": f"模型调用超时或失败：{error}。你可以立即重试，或先改用来源摘要回答。"})
@@ -1049,6 +1087,7 @@ def render_ask_partial_payload(settings, ask_state: dict) -> str:
                 ask_state["messages"],
                 answer=ask_state["answer"],
                 message=ask_state["message"],
+                session_id=ask_state["session_id"],
             ),
         ),
         (

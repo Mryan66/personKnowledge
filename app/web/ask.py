@@ -32,6 +32,7 @@ def render_ask(
     message: str = "",
     answer_state: str = "idle",
     prefill_context: str = "",
+    action_notice: str = "",
 ) -> str:
     sessions = sessions or []
     messages = messages or []
@@ -65,7 +66,13 @@ def render_ask(
         "session_options": render_session_options(sessions, session_id),
         "ask_status_badge": render_ask_status_badge(answer, answer_state),
         "prefill_context_panel": render_prefill_context_panel(prefill_context),
-        "conversation_panel": render_conversation_panel(messages, answer=answer, message=message),
+        "conversation_panel": render_conversation_panel(
+            messages,
+            answer=answer,
+            message=message,
+            session_id=session_id,
+            action_notice=action_notice,
+        ),
         "session_history_drawer": render_session_history_drawer(sessions, session_id),
         "ask_sidebar": render_ask_sidebar(
             sessions=sessions,
@@ -145,10 +152,9 @@ def render_answer_panel(
 ) -> str:
     if answer is None and not message:
         return ""
-
-    parts = ['<details class="answer-drawer" data-result-panel>', '<summary><span>查看引用与操作</span></summary>', '<p class="sr-only" aria-live="polite" data-live-region></p>']
+    parts = ['<section class="sr-only" data-result-panel>']
     if message:
-        parts.append(f'<p class="notice">{escape(message)}</p>')
+        parts.append(f'<p>{escape(message)}</p>')
     if answer:
         parts.append(
             render_answer_summary(
@@ -164,50 +170,7 @@ def render_answer_panel(
                 session_id=session_id,
             )
         )
-        parts.append('<div class="answer-stack">')
-        parts.append('<article class="answer-block answer-block-inline"><h3>最新回答</h3>')
-        parts.append(f'<pre class="answer-text">{escape(answer.text)}</pre></article>')
-        parts.append('<article class="answer-block answer-block-inline"><h3>回答信息</h3><dl class="meta-grid answer-meta">')
-        parts.append(f'<div><dt>回答方式</dt><dd>{escape(describe_answer_mode(answer.mode))}</dd></div>')
-        parts.append(f'<div><dt>可信度</dt><dd>{escape(answer.confidence)}</dd></div>')
-        parts.append(f'<div><dt>引用来源</dt><dd>{len(answer.sources)}</dd></div>')
-        parts.append(f'<div><dt>回答风格</dt><dd>{escape(ANSWER_STYLES.get(answer.style, answer.style))}</dd></div>')
-        parts.append(f'<div><dt>当前问题</dt><dd>{escape(answer.question[:40])}</dd></div>')
-        parts.append('</dl></article>')
-        if answer.sources:
-            parts.append('<article class="answer-block answer-block-inline"><h3>依据来源</h3><ul class="source-list">')
-            for source in answer.sources:
-                parts.append(f'<li>{escape(source)}</li>')
-            parts.append('</ul></article>')
-        if session_id:
-            parts.append(
-                (
-                    '<article class="answer-block answer-block-inline"><h3>下一步可以做</h3><div class="toolbar">'
-                    '<form method="post" action="/ask/save-note" class="inline-action-form">'
-                    f'<input type="hidden" name="session_id" value="{escape(session_id)}">'
-                    '<button type="submit">保存为笔记</button>'
-                    '</form>'
-                    '<a class="secondary-button" href="/ask?session_id={session_id}">继续追问</a>'
-                    '{follow_up_link}'
-                    '</div></article>'
-                ).format(
-                    session_id=escape(session_id),
-                    follow_up_link=build_follow_up_link(answer),
-                )
-            )
-        if answer.citations:
-            parts.append('<article class="answer-block answer-block-inline"><h3>引用片段</h3><div class="citation-grid">')
-            for citation in answer.citations:
-                parts.append(
-                    '<article class="citation-card">'
-                    f'<h4>{escape(citation.title or "Untitled")}</h4>'
-                    f'<small>{escape(citation.source)}</small>'
-                    f'<mark>{escape(citation.snippet)}</mark>'
-                    '</article>'
-                )
-            parts.append('</div></article>')
-        parts.append('</div>')
-    parts.append("</details>")
+    parts.append("</section>")
     return "\n".join(parts)
 
 
@@ -381,7 +344,13 @@ def render_session_options(sessions: list, selected_session_id: str) -> str:
     return "\n".join(options)
 
 
-def render_conversation_panel(messages: list, answer: Optional[Answer] = None, message: str = "") -> str:
+def render_conversation_panel(
+    messages: list,
+    answer: Optional[Answer] = None,
+    message: str = "",
+    session_id: str = "",
+    action_notice: str = "",
+) -> str:
     if not messages and answer is None and not message:
         return (
             '<section class="panel conversation-shell chat-surface">'
@@ -394,20 +363,14 @@ def render_conversation_panel(messages: list, answer: Optional[Answer] = None, m
             '</div></section>'
         )
     parts = ['<section class="panel conversation-shell chat-surface">', '<div class="panel-heading"><h2>聊天记录</h2><p>像即时聊天一样浏览问题、回答和引用上下文。</p></div>', '<div class="chat-thread">']
-    for chat_message in messages:
-        role_class = "chat-user" if chat_message.role == "user" else "chat-assistant"
-        role_label = "你" if chat_message.role == "user" else "知识助手"
-        role_avatar = "你" if chat_message.role == "user" else "AI"
-        parts.append(
-            (
-                f'<article class="chat-bubble {role_class}">'
-                f'<div class="chat-avatar" aria-hidden="true">{role_avatar}</div>'
-                '<div class="chat-bubble-shell">'
-                f'<div class="chat-bubble-head"><strong>{role_label}</strong><span>{escape(chat_message.created_at)}</span></div>'
-                f'<div class="chat-bubble-body"><pre>{escape(chat_message.content)}</pre></div>'
-                '</div></article>'
-            )
-        )
+    if not messages and answer:
+        parts.append(render_chat_message("assistant", answer.text, "刚刚", support_panel=render_message_support_panel(answer, session_id=session_id)))
+    for index, chat_message in enumerate(messages):
+        support_panel = ""
+        is_latest_message = index == len(messages) - 1
+        if answer and chat_message.role == "assistant" and is_latest_message and chat_message.content == answer.text:
+            support_panel = render_message_support_panel(answer, session_id=session_id, action_notice=action_notice)
+        parts.append(render_chat_message(chat_message.role, chat_message.content, chat_message.created_at, support_panel=support_panel))
     if answer is None and message:
         parts.append(
             '<article class="chat-bubble chat-assistant chat-loading">'
@@ -420,6 +383,88 @@ def render_conversation_panel(messages: list, answer: Optional[Answer] = None, m
         )
     parts.append("</div></section>")
     return "\n".join(parts)
+
+
+def render_chat_message(
+    role: str,
+    content: str,
+    created_at: str = "",
+    streaming: bool = False,
+    support_panel: str = "",
+) -> str:
+    role_class = "chat-user" if role == "user" else "chat-assistant"
+    role_label = "你" if role == "user" else "知识助手"
+    role_avatar = "你" if role == "user" else "AI"
+    streaming_attr = ' data-streaming-message="true"' if streaming else ""
+    time_text = created_at or ("处理中" if streaming else "")
+    body = f'<pre>{escape(content)}</pre>' if not streaming else f'<pre data-streaming-content="true">{escape(content)}</pre>'
+    return (
+        f'<article class="chat-bubble {role_class}"{streaming_attr}>'
+        f'<div class="chat-avatar" aria-hidden="true">{role_avatar}</div>'
+        '<div class="chat-bubble-shell">'
+        f'<div class="chat-bubble-head"><strong>{role_label}</strong><span>{escape(time_text)}</span></div>'
+        f'<div class="chat-bubble-body">{body}</div>'
+        f'{support_panel}'
+        '</div></article>'
+    )
+
+
+def render_message_support_panel(answer: Answer, session_id: str = "", action_notice: str = "") -> str:
+    parts = ['<div class="answer-support" data-result-panel>']
+    if action_notice:
+        parts.append(action_notice)
+    parts.append('<div class="answer-inline-meta">')
+    parts.append(f'<span class="tag-chip">模式：{escape(describe_answer_mode(answer.mode))}</span>')
+    parts.append(f'<span class="tag-chip">置信度：{escape(answer.confidence)}</span>')
+    parts.append(f'<span class="tag-chip">来源：{len(answer.sources)}</span>')
+    parts.append(f'<span class="tag-chip">风格：{escape(ANSWER_STYLES.get(answer.style, answer.style))}</span>')
+    parts.append('</div>')
+    if session_id:
+        parts.append('<div class="toolbar answer-inline-actions">')
+        parts.append('<form method="post" action="/ask/save-note" class="inline-action-form">')
+        parts.append(f'<input type="hidden" name="session_id" value="{escape(session_id)}">')
+        parts.append('<button type="submit">保存为笔记</button>')
+        parts.append('</form>')
+        parts.append(f'<a class="secondary-button" href="/ask?session_id={escape(session_id)}">继续追问</a>')
+        parts.append(build_follow_up_link(answer))
+        parts.append('</div>')
+    if answer.sources or answer.citations:
+        parts.append('<details class="message-reference-drawer">')
+        parts.append('<summary><span>查看引用与操作</span></summary>')
+        parts.append(render_answer_summary(answer))
+        if answer.sources:
+            parts.append('<div class="answer-block answer-block-inline"><h3>依据来源</h3><ul class="source-list">')
+            for source in answer.sources:
+                parts.append(f'<li>{escape(source)}</li>')
+            parts.append('</ul></div>')
+        if answer.citations:
+            parts.append('<div class="answer-block answer-block-inline"><h3>引用片段</h3><div class="citation-grid">')
+            for citation in answer.citations:
+                parts.append(
+                    '<article class="citation-card">'
+                    f'<h4>{escape(citation.title or "Untitled")}</h4>'
+                    f'<small>{escape(citation.source)}</small>'
+                    f'<mark>{escape(citation.snippet)}</mark>'
+                    '</article>'
+                )
+            parts.append('</div></div>')
+        parts.append('</details>')
+    parts.append('</div>')
+    return "".join(parts)
+
+
+def render_save_note_notice(note_name: str, note_path: str, document_id: str = "") -> str:
+    knowledge_href = f"/knowledge?document_id={escape(document_id)}#document-detail-panel" if document_id else "/knowledge"
+    return (
+        '<section class="panel result-panel inline-result-panel">'
+        '<p class="notice">已保存并加入知识库。</p>'
+        '<div class="toolbar">'
+        f'<a class="secondary-button" href="/knowledge?message={escape(note_name)}">查看笔记文件：{escape(note_name)}</a>'
+        f'<a class="secondary-button" href="{knowledge_href}">去知识库查看</a>'
+        '</div>'
+        f'<p class="muted">{escape(note_path)}</p>'
+        '</section>'
+    )
 
 
 def render_session_history_panel(sessions: list, selected_session_id: str) -> str:

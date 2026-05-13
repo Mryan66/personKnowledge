@@ -32,6 +32,9 @@ document.addEventListener("alpine:init", () => {
   }));
 });
 
+let shouldStickToBottom = true;
+let scrollFrame = 0;
+
 document.body.addEventListener("htmx:beforeRequest", (event) => {
   const target = event.target as HTMLElement | null;
   if (!target?.closest(".ask-form")) return;
@@ -137,12 +140,27 @@ function startAskStream(
   });
 
   stream.addEventListener("patch", (event) => {
+    rememberStickyIntent();
     const data = JSON.parse((event as MessageEvent).data) as Record<string, string>;
-    replaceRegion("ask-status-bar", data.status_bar);
-    replaceRegion("ask-session-drawer", data.session_drawer);
-    replaceRegion("ask-conversation-region", data.conversation);
-    replaceRegion("ask-answer-region", data.answer);
-    syncChatScroll();
+    if (data.status_bar !== undefined) replaceRegion("ask-status-bar", data.status_bar);
+    if (data.session_drawer !== undefined) replaceRegion("ask-session-drawer", data.session_drawer);
+    if (data.conversation !== undefined) replaceRegion("ask-conversation-region", data.conversation);
+    if (data.answer !== undefined) replaceRegion("ask-answer-region", data.answer);
+    syncChatScrollIfNeeded();
+  });
+
+  stream.addEventListener("stream_start", (event) => {
+    rememberStickyIntent();
+    const data = JSON.parse((event as MessageEvent).data) as { html?: string };
+    mountStreamingMessage(data.html || "");
+    syncChatScrollIfNeeded();
+  });
+
+  stream.addEventListener("stream_delta", (event) => {
+    rememberStickyIntent();
+    const data = JSON.parse((event as MessageEvent).data) as { content?: string };
+    updateStreamingMessage(data.content || "");
+    syncChatScrollIfNeeded();
   });
 
   stream.addEventListener("error", (event) => {
@@ -163,7 +181,8 @@ function startAskStream(
     if (textarea) {
       textarea.value = "";
     }
-    syncChatScroll();
+    clearStreamingMessageMarker();
+    syncChatScrollIfNeeded(true);
     const resultPanel = document.querySelector<HTMLElement>("[data-result-panel]");
     if (resultPanel) {
       resultPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -182,6 +201,51 @@ function syncChatScroll() {
   const chatThread = document.querySelector<HTMLElement>(".chat-thread");
   if (chatThread) {
     chatThread.scrollTop = chatThread.scrollHeight;
+  }
+}
+
+function syncChatScrollIfNeeded(force = false) {
+  const chatThread = document.querySelector<HTMLElement>(".chat-thread");
+  if (!chatThread) return;
+  if (!force && !shouldStickToBottom) return;
+  if (scrollFrame) cancelAnimationFrame(scrollFrame);
+  scrollFrame = requestAnimationFrame(() => {
+    chatThread.scrollTop = chatThread.scrollHeight;
+    scrollFrame = 0;
+  });
+}
+
+function rememberStickyIntent() {
+  const chatThread = document.querySelector<HTMLElement>(".chat-thread");
+  if (!chatThread) return;
+  shouldStickToBottom = isNearBottom(chatThread);
+}
+
+function isNearBottom(element: HTMLElement, threshold = 48) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+}
+
+function mountStreamingMessage(html: string) {
+  const chatThread = document.querySelector<HTMLElement>(".chat-thread");
+  if (!chatThread) return;
+  clearStreamingMessageMarker();
+  chatThread.insertAdjacentHTML("beforeend", html);
+}
+
+function updateStreamingMessage(content: string) {
+  const contentNode = document.querySelector<HTMLElement>('[data-streaming-content="true"]');
+  if (!contentNode) return;
+  contentNode.textContent = content;
+}
+
+function clearStreamingMessageMarker() {
+  const streamingNode = document.querySelector<HTMLElement>('[data-streaming-message="true"]');
+  if (streamingNode) {
+    streamingNode.removeAttribute("data-streaming-message");
+  }
+  const streamingContent = document.querySelector<HTMLElement>('[data-streaming-content="true"]');
+  if (streamingContent) {
+    streamingContent.removeAttribute("data-streaming-content");
   }
 }
 

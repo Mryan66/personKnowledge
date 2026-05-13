@@ -8,10 +8,12 @@ from app.memory.database import ChatMessageRecord, ChatSessionRecord
 from app.web.ask import (
     render_answer_panel,
     render_ask,
+    render_chat_message,
     render_ask_sidebar,
     render_ask_status_badge,
     render_conversation_panel,
     render_prefill_context_panel,
+    render_save_note_notice,
     render_session_history_drawer,
     render_session_history_panel,
 )
@@ -35,14 +37,8 @@ class AskWebTests(unittest.TestCase):
 
         html = render_answer_panel(answer, message="done", session_id="3")
 
-        self.assertIn("RAG 是检索增强生成", html)
-        self.assertIn("note.md#chunk-0", html)
-        self.assertIn("high", html)
         self.assertIn("done", html)
-        self.assertIn("保存为笔记", html)
         self.assertIn("回答已生成", html)
-        self.assertIn("依据来源", html)
-        self.assertIn("查看引用与操作", html)
 
     def test_render_answer_panel_empty_result_state(self):
         answer = Answer(
@@ -72,7 +68,7 @@ class AskWebTests(unittest.TestCase):
         html = render_answer_panel(answer, message="general", question="什么是 MCP？")
 
         self.assertIn("通用 AI 能力", html)
-        self.assertIn("AI 兜底回答", html)
+        self.assertNotIn("保存为笔记", html)
 
     def test_render_answer_panel_fallback_state_includes_source_only_action(self):
         answer = Answer(
@@ -123,12 +119,52 @@ class AskWebTests(unittest.TestCase):
             [
                 ChatMessageRecord(1, 1, "user", "什么是 RAG？", [], "concise", "2026-05-06"),
                 ChatMessageRecord(2, 1, "assistant", "RAG 是检索增强生成。", ["rag.md#chunk-0"], "concise", "2026-05-06"),
-            ]
+            ],
+            answer=Answer(
+                question="RAG 是什么？",
+                text="RAG 是检索增强生成。",
+                sources=["rag.md#chunk-0"],
+                confidence="high",
+                mode="rag",
+                style="balanced",
+            ),
+            session_id="1",
         )
 
         self.assertIn("聊天记录", html)
         self.assertIn("什么是 RAG", html)
         self.assertIn("RAG 是检索增强生成", html)
+        self.assertIn("保存为笔记", html)
+        self.assertIn("查看引用与操作", html)
+
+    def test_render_ask_page_surfaces_save_note_success_message(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            template_path = root / "ask.html"
+            template_path.write_text("{{ conversation_panel }} {{ answer_panel }}", encoding="utf-8")
+            settings = Settings(workspace_dir=root)
+
+            html = render_ask(
+                settings,
+                template_path,
+                session_id="1",
+                message="已保存并加入知识库：example.md",
+            )
+
+        self.assertIn("已保存并加入知识库：example.md", html)
+
+    def test_render_chat_message_supports_streaming_marker(self):
+        html = render_chat_message("assistant", "流式回答", "处理中", streaming=True)
+
+        self.assertIn('data-streaming-message="true"', html)
+        self.assertIn('data-streaming-content="true"', html)
+
+    def test_render_save_note_notice_includes_links(self):
+        html = render_save_note_notice("example.md", "/tmp/example.md", "12")
+
+        self.assertIn("已保存并加入知识库", html)
+        self.assertIn("去知识库查看", html)
+        self.assertIn("document_id=12", html)
 
     def test_render_session_history_panel(self):
         html = render_session_history_panel(
