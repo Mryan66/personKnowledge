@@ -85,6 +85,19 @@ CREATE TABLE IF NOT EXISTS review_runs (
     output_path TEXT,
     error_message TEXT
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT 'auto',
+    status TEXT NOT NULL DEFAULT 'open',
+    due_date TEXT,
+    priority TEXT NOT NULL DEFAULT 'normal',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    done_at TEXT
+);
 """
 
 
@@ -148,6 +161,22 @@ class ChatMessageRecord:
     sources: List[str]
     style: str
     created_at: str
+
+
+@dataclass(frozen=True)
+class TaskRecord:
+    id: int
+    document_id: Optional[int]
+    content: str
+    source_type: str
+    status: str
+    due_date: str
+    priority: str
+    created_at: str
+    updated_at: str
+    done_at: str
+    document_title: str = ""
+    document_source_path: str = ""
 
 
 def initialize_database(database_path: Path) -> None:
@@ -350,6 +379,191 @@ def delete_document(database_path: Path, document_id: int) -> bool:
             connection.execute("PRAGMA foreign_keys = ON")
             cursor = connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
         return cursor.rowcount > 0
+
+
+def record_tasks_from_organizer(database_path: Path, document_id: int, action_items: List[str]) -> int:
+    initialize_database(database_path)
+    normalized_items = []
+    seen = set()
+    for raw_item in action_items:
+        item = (raw_item or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        normalized_items.append(item)
+    if not normalized_items:
+        return 0
+
+    inserted = 0
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            connection.execute("PRAGMA foreign_keys = ON")
+            for content in normalized_items:
+                existing = connection.execute(
+                    """
+                    SELECT id, status
+                    FROM tasks
+                    WHERE document_id = ? AND content = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (document_id, content),
+                ).fetchone()
+                if existing is not None:
+                    continue
+                connection.execute(
+                    """
+                    INSERT INTO tasks (document_id, content, source_type, status, priority, updated_at)
+                    VALUES (?, ?, 'auto', 'open', 'normal', CURRENT_TIMESTAMP)
+                    """,
+                    (document_id, content),
+                )
+                inserted += 1
+    return inserted
+
+
+def create_manual_task(database_path: Path, content: str, due_date: str = "", priority: str = "normal") -> int:
+    initialize_database(database_path)
+    normalized_content = content.strip()
+    if not normalized_content:
+        raise ValueError("Task content cannot be empty.")
+    normalized_due_date = normalize_date_value(due_date) if due_date else ""
+    normalized_priority = _normalize_task_priority(priority)
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO tasks (content, source_type, status, due_date, priority, updated_at)
+                VALUES (?, 'manual', 'open', ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (normalized_content, normalized_due_date, normalized_priority),
+            )
+        return cursor.lastrowid
+
+
+def list_tasks(
+    database_path: Path,
+    status_filter: str = "open",
+    document_id: Optional[int] = None,
+    limit: int = 50,
+) -> List[dict]:
+    initialize_database(database_path)
+    normalized_status = _normalize_task_status(status_filter)
+    where_clauses = ["t.status = ?"]
+    params: list = [normalized_status]
+    if document_id is not None:
+        where_clauses.append("t.document_id = ?")
+        params.append(document_id)
+    params.append(limit)
+    query = f"""
+        SELECT
+            t.id,
+            t.document_id,
+            t.content,
+            t.source_type,
+            t.status,
+            t.due_date,
+            t.priority,
+            t.created_at,
+            t.updated_at,
+            t.done_at,
+            d.title,
+            d.source_path
+        FROM tasks t
+        LEFT JOIN documents d ON d.id = t.document_id
+        WHERE {' AND '.join(where_clauses)}
+        ORDER BY
+            CASE t.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END ASC,
+            CASE WHEN TRIM(COALESCE(t.due_date, '')) = '' THEN 1 ELSE 0 END ASC,
+            t.due_date ASC,
+            t.updated_at DESC,
+            t.id DESC
+        LIMIT ?
+    """
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute(query, tuple(params)).fetchall()
+    return [_task_from_row(row) for row in rows]
+
+
+def update_task_status(database_path: Path, task_id: int, status: str) -> bool:
+    initialize_database(database_path)
+    normalized_status = _normalize_task_status(status)
+    done_at_value = "CURRENT_TIMESTAMP" if normalized_status == "done" else "NULL"
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE tasks
+                SET status = ?, updated_at = CURRENT_TIMESTAMP, done_at = {done_at_value}
+                WHERE id = ?
+                """,
+                (normalized_status, task_id),
+            )
+        return cursor.rowcount > 0
+
+
+def update_task_fields(
+    database_path: Path,
+    task_id: int,
+    content: Optional[str] = None,
+    due_date: Optional[str] = None,
+    priority: Optional[str] = None,
+) -> bool:
+    initialize_database(database_path)
+    assignments = []
+    params: list = []
+    if content is not None:
+        normalized_content = content.strip()
+        if not normalized_content:
+            raise ValueError("Task content cannot be empty.")
+        assignments.append("content = ?")
+        params.append(normalized_content)
+    if due_date is not None:
+        assignments.append("due_date = ?")
+        params.append(normalize_date_value(due_date) if due_date else "")
+    if priority is not None:
+        assignments.append("priority = ?")
+        params.append(_normalize_task_priority(priority))
+    if not assignments:
+        return False
+    assignments.append("updated_at = CURRENT_TIMESTAMP")
+    params.append(task_id)
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE tasks
+                SET {', '.join(assignments)}
+                WHERE id = ?
+                """,
+                tuple(params),
+            )
+        return cursor.rowcount > 0
+
+
+def delete_task(database_path: Path, task_id: int) -> bool:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            cursor = connection.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        return cursor.rowcount > 0
+
+
+def count_tasks_by_status(database_path: Path) -> dict:
+    initialize_database(database_path)
+    counts = {"open": 0, "done": 0, "archived": 0}
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute(
+            """
+            SELECT status, COUNT(*)
+            FROM tasks
+            GROUP BY status
+            """
+        ).fetchall()
+    for status, count in rows:
+        if status in counts:
+            counts[status] = count
+    return counts
 
 
 def upsert_chunk_embeddings(database_path: Path, chunk_embeddings: List[tuple], model: str) -> None:
@@ -818,6 +1032,23 @@ def _document_from_row(row) -> DocumentRecord:
     )
 
 
+def _task_from_row(row) -> dict:
+    return {
+        "id": row[0],
+        "document_id": row[1],
+        "content": row[2] or "",
+        "source_type": row[3] or "auto",
+        "status": row[4] or "open",
+        "due_date": row[5] or "",
+        "priority": row[6] or "normal",
+        "created_at": row[7] or "",
+        "updated_at": row[8] or "",
+        "done_at": row[9] or "",
+        "document_title": row[10] or "",
+        "document_source_path": row[11] or "",
+    }
+
+
 def _search_from_row(row, score: float) -> SearchRecord:
     return SearchRecord(
         document_id=row[0],
@@ -974,6 +1205,26 @@ def extract_similarity_tokens(text: str) -> set[str]:
 
 def ensure_document_columns(database_path: Path) -> None:
     with closing(sqlite3.connect(database_path)) as connection:
+        with connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+                    content TEXT NOT NULL,
+                    source_type TEXT NOT NULL DEFAULT 'auto',
+                    status TEXT NOT NULL DEFAULT 'open',
+                    due_date TEXT,
+                    priority TEXT NOT NULL DEFAULT 'normal',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    done_at TEXT
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_document_content ON tasks(document_id, content)"
+            )
         rows = connection.execute("PRAGMA table_info(documents)").fetchall()
         column_names = {row[1] for row in rows}
         additions = {
@@ -1064,6 +1315,20 @@ def count_documents(database_path: Path) -> int:
     initialize_database(database_path)
     with closing(sqlite3.connect(database_path)) as connection:
         return connection.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+
+
+def _normalize_task_status(status: str) -> str:
+    value = (status or "").strip().lower()
+    if value not in {"open", "done", "archived"}:
+        raise ValueError(f"Unsupported task status: {status}")
+    return value
+
+
+def _normalize_task_priority(priority: str) -> str:
+    value = (priority or "").strip().lower()
+    if value not in {"high", "normal", "low"}:
+        raise ValueError(f"Unsupported task priority: {priority}")
+    return value
 
 
 def list_potential_duplicates(database_path: Path, document_id: int, limit: int = 5) -> List[dict]:

@@ -16,7 +16,10 @@ from app.memory.database import (
     ChatMessageRecord,
     add_chat_message,
     add_search_history,
+    count_tasks_by_status,
+    create_manual_task,
     create_or_update_chat_session,
+    delete_task,
     delete_document,
     get_chat_session,
     get_document_by_id,
@@ -25,10 +28,13 @@ from app.memory.database import (
     list_all_tags,
     list_chat_messages,
     list_chat_sessions,
+    list_tasks,
     record_review_run,
     list_chunks,
     list_search_history,
     list_similar_documents,
+    update_task_fields,
+    update_task_status,
     update_document_metadata,
 )
 from app.tools.file_tool import ensure_directory
@@ -49,6 +55,7 @@ from app.web.ask import (
 from app.web.review import read_review_file, render_review
 from app.web.search import render_search
 from app.web.settings import render_settings
+from app.web.tasks import render_tasks_page
 from app.tools.secret_store import SecretStoreError, save_openai_api_key
 from app.tools.search_tool import SearchTool
 
@@ -87,6 +94,9 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             return
         if path == "/settings":
             self._send_html(render_settings(get_settings(), TEMPLATE_DIR / "settings.html"))
+            return
+        if path == "/tasks":
+            self._handle_tasks_get()
             return
         if path == "/static/app.css":
             self._send_file(STATIC_DIR / "app.css", "text/css; charset=utf-8")
@@ -136,6 +146,18 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             return
         if path == "/settings/openai/test":
             self._handle_settings_openai_test_post()
+            return
+        if path == "/tasks/create":
+            self._handle_tasks_create_post()
+            return
+        if path == "/tasks/update":
+            self._handle_tasks_update_post()
+            return
+        if path == "/tasks/status":
+            self._handle_tasks_status_post()
+            return
+        if path == "/tasks/delete":
+            self._handle_tasks_delete_post()
             return
         self.send_error(404, "Page not found")
 
@@ -539,6 +561,78 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 selected_body=selected_body,
             )
         )
+
+    def _handle_tasks_get(self) -> None:
+        settings = get_settings()
+        query = parse_qs(urlparse(self.path).query)
+        status = query.get("status", ["open"])[0].strip() or "open"
+        message = query.get("message", [""])[0]
+        try:
+            self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status=status, message=message))
+        except ValueError:
+            self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message="任务状态无效。"))
+
+    def _handle_tasks_create_post(self) -> None:
+        settings = get_settings()
+        form = self._read_form()
+        try:
+            create_manual_task(
+                settings.resolved_database_path,
+                content=form.get("content", [""])[0],
+                due_date=form.get("due_date", [""])[0],
+                priority=form.get("priority", ["normal"])[0],
+            )
+            message = "任务已创建。"
+        except ValueError as error:
+            message = f"创建任务失败：{error}"
+        self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message=message))
+
+    def _handle_tasks_update_post(self) -> None:
+        settings = get_settings()
+        form = self._read_form()
+        task_id = parse_task_id(form)
+        if task_id is None:
+            self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message="任务 ID 无效。"))
+            return
+        try:
+            updated = update_task_fields(
+                settings.resolved_database_path,
+                task_id,
+                content=form.get("content", [""])[0],
+                due_date=form.get("due_date", [""])[0],
+                priority=form.get("priority", ["normal"])[0],
+            )
+            message = "任务已更新。" if updated else "未找到要更新的任务。"
+        except ValueError as error:
+            message = f"更新任务失败：{error}"
+        self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message=message))
+
+    def _handle_tasks_status_post(self) -> None:
+        settings = get_settings()
+        form = self._read_form()
+        task_id = parse_task_id(form)
+        status = form.get("status", ["open"])[0]
+        if task_id is None:
+            self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message="任务 ID 无效。"))
+            return
+        try:
+            updated = update_task_status(settings.resolved_database_path, task_id, status)
+            message = "任务状态已更新。" if updated else "未找到要更新的任务。"
+            selected_status = status if status in {"open", "done", "archived"} else "open"
+        except ValueError as error:
+            message = f"更新任务状态失败：{error}"
+            selected_status = "open"
+        self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status=selected_status, message=message))
+
+    def _handle_tasks_delete_post(self) -> None:
+        settings = get_settings()
+        form = self._read_form()
+        task_id = parse_task_id(form)
+        if task_id is None:
+            self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message="任务 ID 无效。"))
+            return
+        message = "任务已删除。" if delete_task(settings.resolved_database_path, task_id) else "未找到要删除的任务。"
+        self._send_html(render_tasks_page(settings, TEMPLATE_DIR / "tasks.html", status="open", message=message))
 
     def _handle_knowledge_update_post(self) -> None:
         settings = get_settings()
@@ -1036,6 +1130,13 @@ def build_organizer_agent(settings):
 
 def parse_document_id(form: dict):
     raw = form.get("document_id", [""])[0].strip()
+    if not raw.isdigit():
+        return None
+    return int(raw)
+
+
+def parse_task_id(form: dict):
+    raw = form.get("id", [""])[0].strip()
     if not raw.isdigit():
         return None
     return int(raw)

@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.ingest.pipeline import ingest_path
 from app.ingest.scanner import scan_inbox
 from app.memory.database import initialize_database, record_review_run
+from app.memory.database import create_manual_task, delete_task, list_tasks, update_task_status
 from app.tools.embedding_tool import EmbeddingTool
 from app.tools.openai_client import OpenAIClient
 from app.tools.search_tool import SearchTool
@@ -205,6 +206,44 @@ def web(args: argparse.Namespace) -> None:
     run_web_server(host=args.host, port=args.port)
 
 
+def tasks_list(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    tasks = list_tasks(settings.resolved_database_path, status_filter=args.status, limit=args.limit)
+    if not tasks:
+        print(f"No {args.status} tasks found.")
+        return
+    print("Tasks")
+    print("-----")
+    for task in tasks:
+        due_text = task["due_date"] or "-"
+        document_text = f" doc={task['document_id']}" if task["document_id"] else ""
+        print(f"[{task['id']}] ({task['priority']}) {task['content']}")
+        print(f"  status: {task['status']}  due: {due_text}  source: {task['source_type']}{document_text}")
+
+
+def tasks_add(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    task_id = create_manual_task(
+        settings.resolved_database_path,
+        content=args.content,
+        due_date=args.due,
+        priority=args.priority,
+    )
+    print(f"Created task #{task_id}.")
+
+
+def tasks_done(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    updated = update_task_status(settings.resolved_database_path, args.id, "done")
+    print(f"Marked task #{args.id} done." if updated else f"Task #{args.id} not found.")
+
+
+def tasks_delete(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    deleted = delete_task(settings.resolved_database_path, args.id)
+    print(f"Deleted task #{args.id}." if deleted else f"Task #{args.id} not found.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Personal AI Knowledge Butler CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -248,6 +287,28 @@ def build_parser() -> argparse.ArgumentParser:
     review_parser.add_argument("--triggered-by", choices=["cli", "auto", "web"], default="cli", help="Record how this review run was triggered.")
     review_parser.add_argument("--no-write", action="store_true", help="Print only; do not write a review file.")
     review_parser.set_defaults(func=review)
+
+    tasks_parser = subparsers.add_parser("tasks", help="Manage extracted and manual tasks.")
+    tasks_subparsers = tasks_parser.add_subparsers(dest="tasks_command", required=True)
+
+    tasks_list_parser = tasks_subparsers.add_parser("list", help="List tasks.")
+    tasks_list_parser.add_argument("--status", choices=["open", "done", "archived"], default="open", help="Task status filter.")
+    tasks_list_parser.add_argument("--limit", type=int, default=50, help="Maximum number of tasks.")
+    tasks_list_parser.set_defaults(func=tasks_list)
+
+    tasks_add_parser = tasks_subparsers.add_parser("add", help="Create a manual task.")
+    tasks_add_parser.add_argument("content", help="Task content.")
+    tasks_add_parser.add_argument("--due", default="", help="Task due date in YYYY-MM-DD.")
+    tasks_add_parser.add_argument("--priority", choices=["high", "normal", "low"], default="normal", help="Task priority.")
+    tasks_add_parser.set_defaults(func=tasks_add)
+
+    tasks_done_parser = tasks_subparsers.add_parser("done", help="Mark task as done.")
+    tasks_done_parser.add_argument("id", type=int, help="Task ID.")
+    tasks_done_parser.set_defaults(func=tasks_done)
+
+    tasks_delete_parser = tasks_subparsers.add_parser("delete", help="Delete a task.")
+    tasks_delete_parser.add_argument("id", type=int, help="Task ID.")
+    tasks_delete_parser.set_defaults(func=tasks_delete)
 
     return parser
 

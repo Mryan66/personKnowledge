@@ -6,7 +6,7 @@ from app.agents.organizer_agent import OrganizationResult
 from app.ingest.chunker import chunk_text
 from app.ingest.pipeline import ingest_file, ingest_path
 from app.ingest.summarizer import extract_title, generate_tags, summarize
-from app.memory.database import count_chunks, get_document
+from app.memory.database import count_chunks, get_document, list_tasks
 
 
 class IngestPipelineTests(unittest.TestCase):
@@ -58,11 +58,14 @@ class IngestPipelineTests(unittest.TestCase):
 
             result = ingest_file(document_path, database_path, organizer_agent=StubOrganizerAgent())
             record = get_document(database_path, document_path)
+            tasks = list_tasks(database_path, status_filter="open", document_id=result.document_id, limit=10)
 
         self.assertEqual(result.title, "整理后的标题")
         self.assertEqual(result.summary, "整理后的摘要")
         self.assertEqual(result.tags, ["agent", "memory"])
         self.assertEqual(record.title, "整理后的标题")
+        self.assertEqual(len(tasks), 1)
+        self.assertEqual(tasks[0]["content"], "补充示例")
 
     def test_ingest_path_skips_unsupported_files(self):
         with TemporaryDirectory() as temporary_directory:

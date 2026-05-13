@@ -12,6 +12,7 @@ from app.memory.database import (
     find_document_by_content_hash,
     get_document,
     list_potential_duplicates,
+    record_tasks_from_organizer,
     upsert_document,
 )
 from app.tools.embedding_tool import EmbeddingTool
@@ -116,6 +117,8 @@ def ingest_file(
         chunks=chunks,
         existing_document_id=existing_document_id,
     )
+    if organization.action_items:
+        record_tasks_from_organizer(database_path, document_id, organization.action_items)
     embedding_count = 0
     if embedding_tool:
         embedding_count = embedding_tool.embed_document_chunks(database_path, document_id)
