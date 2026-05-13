@@ -1,6 +1,6 @@
 from html import escape
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 from urllib.parse import quote
 
 from app.config import Settings
@@ -24,10 +24,14 @@ def render_search(
     results: List[SearchResult] = None,
     search_history: List[dict] = None,
     message: str = "",
+    common_tags: List[Tuple[str, int]] = None,
+    common_categories: List[Tuple[str, int]] = None,
 ) -> str:
     results = results or []
     search_history = search_history or []
     filters = filters or {}
+    common_tags = common_tags or []
+    common_categories = common_categories or []
     normalized_mode = mode if mode in SEARCH_MODES else "auto"
     context = {
         "app_name": settings.app_name,
@@ -41,6 +45,8 @@ def render_search(
         "person_filter": escape(filters.get("person", "")),
         "date_from_filter": escape(filters.get("date_from", "")),
         "date_to_filter": escape(filters.get("date_to", "")),
+        "common_tags_panel": render_filter_chip_group("tags", common_tags, filters.get("tags") or []),
+        "common_categories_panel": render_filter_chip_group("categories", common_categories, filters.get("categories") or []),
         "mode_options": render_mode_options(normalized_mode),
         "mode_description": SEARCH_MODES[normalized_mode],
         "openai_status": "已配置" if settings.openai_api_key else "未配置",
@@ -115,9 +121,28 @@ def render_active_filters(filters: dict) -> str:
         value = (filters.get(key) or "").strip()
         if value:
             items.append(f'<span class="filter-chip">{escape(label)}: <strong>{escape(value)}</strong></span>')
+    for value in filters.get("categories") or []:
+        items.append(f'<span class="filter-chip">分类: <strong>{escape(value)}</strong></span>')
+    for value in filters.get("tags") or []:
+        items.append(f'<span class="filter-chip">标签: <strong>{escape(value)}</strong></span>')
     if not items:
         return ""
     return '<div class="chip-row">' + " ".join(items) + "</div>"
+
+
+def render_filter_chip_group(field_name: str, items: List[Tuple[str, int]], selected_values: List[str]) -> str:
+    if not items:
+        return ""
+    selected = {value.strip().lower() for value in selected_values if value.strip()}
+    chips = ['<div class="chip-row">']
+    for value, count in items:
+        checked = " checked" if value.strip().lower() in selected else ""
+        chips.append(
+            f'<label class="filter-chip"><input type="checkbox" name="{escape(field_name)}" value="{escape(value)}"{checked}>'
+            f'{escape(value)} ({count})</label>'
+        )
+    chips.append("</div>")
+    return "".join(chips)
 
 
 def render_search_history_panel(history: List[dict]) -> str:

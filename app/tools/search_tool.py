@@ -31,7 +31,7 @@ class SearchTool:
         query: str,
         limit: int = 5,
         mode: str = "auto",
-        filters: Optional[Dict[str, str]] = None,
+        filters: Optional[Dict[str, object]] = None,
     ) -> List[SearchResult]:
         filters = filters or {}
         if mode == "keyword":
@@ -137,14 +137,30 @@ class SearchTool:
 
         return results
 
-    def _normalize_filters(self, filters: Dict[str, str]) -> Dict[str, str]:
+    def _normalize_filters(self, filters: Dict[str, object]) -> Dict[str, object]:
         return {
             "category": (filters.get("category") or "").strip(),
             "tag": (filters.get("tag") or "").strip(),
+            "categories": self._normalize_filter_list(filters.get("categories")),
+            "tags": self._normalize_filter_list(filters.get("tags")),
             "person": (filters.get("person") or "").strip(),
             "date_from": (filters.get("date_from") or "").strip(),
             "date_to": (filters.get("date_to") or "").strip(),
         }
+
+    def _normalize_filter_list(self, value: object) -> List[str]:
+        if not isinstance(value, list):
+            return []
+        normalized = []
+        seen = set()
+        for item in value:
+            text = str(item or "").strip()
+            lowered = text.lower()
+            if not text or lowered in seen:
+                continue
+            seen.add(lowered)
+            normalized.append(text)
+        return normalized
 
     def _map_record(self, record, mode: str, override_score: Optional[float] = None) -> SearchResult:
         return SearchResult(

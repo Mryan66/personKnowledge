@@ -5,7 +5,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from app.tools.vector_tool import cosine_similarity
 
@@ -433,6 +433,8 @@ def search_documents_advanced(
     limit: int = 5,
     category: str = "",
     tag: str = "",
+    categories: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
     person: str = "",
     date_from: str = "",
     date_to: str = "",
@@ -442,6 +444,8 @@ def search_documents_advanced(
         records,
         category=category,
         tag=tag,
+        categories=categories,
+        tags=tags,
         person=person,
         date_from=date_from,
         date_to=date_to,
@@ -494,18 +498,24 @@ def apply_search_filters(
     records: List[SearchRecord],
     category: str = "",
     tag: str = "",
+    categories: Optional[List[str]] = None,
+    tags: Optional[List[str]] = None,
     person: str = "",
     date_from: str = "",
     date_to: str = "",
 ) -> List[SearchRecord]:
-    normalized_category = category.strip().lower()
-    normalized_tag = tag.strip().lower()
+    normalized_categories = _normalize_filter_values(categories, fallback_value=category)
+    normalized_tags = _normalize_filter_values(tags, fallback_value=tag)
     normalized_person = person.strip().lower()
     filtered = []
     for record in records:
-        if normalized_category and normalized_category not in (record.category or "").lower():
+        category_value = (record.category or "").lower()
+        if normalized_categories and not any(value in category_value for value in normalized_categories):
             continue
-        if normalized_tag and not any(normalized_tag in item.lower() for item in record.tags):
+        record_tags = [item.lower() for item in (record.tags or [])]
+        if normalized_tags and not any(
+            any(value in record_tag for record_tag in record_tags) for value in normalized_tags
+        ):
             continue
         if normalized_person:
             people_values = [item.lower() for item in (record.people or [])]
@@ -516,6 +526,41 @@ def apply_search_filters(
                 continue
         filtered.append(record)
     return filtered
+
+
+def list_all_tags(database_path: Path, limit: int = 50) -> List[Tuple[str, int]]:
+    initialize_database(database_path)
+    counts: dict[str, int] = {}
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute("SELECT tags FROM documents").fetchall()
+
+    for row in rows:
+        try:
+            tags = json.loads(row[0] or "[]")
+        except json.JSONDecodeError:
+            continue
+        for raw_tag in tags:
+            tag = (raw_tag or "").strip()
+            if not tag:
+                continue
+            counts[tag] = counts.get(tag, 0) + 1
+
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:limit]
+
+
+def list_all_categories(database_path: Path) -> List[Tuple[str, int]]:
+    initialize_database(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        rows = connection.execute(
+            """
+            SELECT category, COUNT(*)
+            FROM documents
+            WHERE TRIM(COALESCE(category, '')) != ''
+            GROUP BY category
+            ORDER BY COUNT(*) DESC, category ASC
+            """
+        ).fetchall()
+    return [(row[0], row[1]) for row in rows]
 
 
 def matches_date_range(dates: List[str], date_from: str = "", date_to: str = "") -> bool:
@@ -551,6 +596,18 @@ def normalize_date_value(value: str) -> str:
         return ""
     year, month, day = parts
     return f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+
+
+def _normalize_filter_values(values: Optional[List[str]], fallback_value: str = "") -> List[str]:
+    normalized = []
+    seen = set()
+    for raw_value in list(values or []) + ([fallback_value] if fallback_value else []):
+        value = (raw_value or "").strip().lower()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
 
 
 def list_documents(database_path: Path, limit: int = 20) -> List[DocumentRecord]:

@@ -41,10 +41,22 @@
             分类
             <input type="text" name="category" value="{{ category_filter }}" placeholder="如 agent / project">
           </label>
+          {% if common_categories_panel %}
+            <label>
+              常用分类
+              {{ common_categories_panel | safe }}
+            </label>
+          {% endif %}
           <label>
             标签
             <input type="text" name="tag" value="{{ tag_filter }}" placeholder="如 rag / memory">
           </label>
+          {% if common_tags_panel %}
+            <label>
+              常用标签
+              {{ common_tags_panel | safe }}
+            </label>
+          {% endif %}
           <label>
             人物
             <input type="text" name="person" value="{{ person_filter }}" placeholder="如 张三 / Alice">
@@ -58,10 +70,13 @@
             <input type="date" name="date_to" value="{{ date_to_filter }}">
           </label>
         </details>
-        <button type="submit">
-          <span class="submit-label">开始搜索</span>
-          <span class="htmx-indicator">正在搜索...</span>
-        </button>
+        <div class="chip-row">
+          <button type="submit">
+            <span class="submit-label">开始搜索</span>
+            <span class="htmx-indicator">正在搜索...</span>
+          </button>
+          <a class="btn-secondary" href="/search">清空筛选</a>
+        </div>
       </form>
     </section>
 

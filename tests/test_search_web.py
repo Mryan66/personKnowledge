@@ -59,7 +59,8 @@ class SearchWebTests(unittest.TestCase):
             template_path.write_text(
                 "{{ app_name }} {{ query }} {{ limit }} {{ mode_options }} {{ mode_description }} "
                 "{{ openai_status }} {{ openai_status_class }} {{ result_count }} {{ category_filter }} {{ tag_filter }} "
-                "{{ person_filter }} {{ date_from_filter }} {{ date_to_filter }} {{ results_panel }}",
+                "{{ person_filter }} {{ date_from_filter }} {{ date_to_filter }} {{ common_tags_panel }} "
+                "{{ common_categories_panel }} {{ results_panel }}",
                 encoding="utf-8",
             )
             settings = Settings(workspace_dir=root)
@@ -73,10 +74,14 @@ class SearchWebTests(unittest.TestCase):
                 filters={
                     "category": "agent",
                     "tag": "rag",
+                    "categories": ["project"],
+                    "tags": ["memory"],
                     "person": "张三",
                     "date_from": "2026-05-01",
                     "date_to": "2026-05-31",
                 },
+                common_tags=[("memory", 2)],
+                common_categories=[("project", 1)],
             )
 
         self.assertIn("Personal AI Knowledge Butler", html)
@@ -86,6 +91,8 @@ class SearchWebTests(unittest.TestCase):
         self.assertIn("未配置", html)
         self.assertIn("agent", html)
         self.assertIn("张三", html)
+        self.assertIn('name="tags"', html)
+        self.assertIn('name="categories"', html)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ from app.memory.database import (
     get_chat_session,
     get_document_by_id,
     get_latest_assistant_message,
+    list_all_categories,
+    list_all_tags,
     list_chat_messages,
     list_chat_sessions,
     list_chunks,
@@ -267,6 +269,8 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
         mode = request_query.get("mode", ["auto"])[0]
         limit = 5
         filters = extract_search_filters(request_query)
+        common_tags = list_all_tags(settings.resolved_database_path)
+        common_categories = list_all_categories(settings.resolved_database_path)
         results = []
         message = ""
         search_tool = SearchTool(settings.resolved_database_path, embedding_tool=build_embedding_tool(settings))
@@ -286,6 +290,8 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 results=results,
                 search_history=search_history,
                 message=message,
+                common_tags=common_tags,
+                common_categories=common_categories,
             )
         )
 
@@ -305,6 +311,8 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
             add_search_history(settings.resolved_database_path, query, mode, len(results))
         message = f"已搜索：{query}" if query else "请输入搜索内容。"
         search_history = list_search_history(settings.resolved_database_path)
+        common_tags = list_all_tags(settings.resolved_database_path)
+        common_categories = list_all_categories(settings.resolved_database_path)
         self._send_html(
             render_search(
                 settings,
@@ -316,6 +324,8 @@ class KnowledgeButlerHandler(BaseHTTPRequestHandler):
                 results=results,
                 search_history=search_history,
                 message=message,
+                common_tags=common_tags,
+                common_categories=common_categories,
             )
         )
 
@@ -1027,13 +1037,33 @@ def parse_chunk_index(raw: str):
 
 
 def extract_search_filters(values: dict) -> dict:
+    tags = _merge_filter_values(values.get("tag", []), values.get("tags", []))
+    categories = _merge_filter_values(values.get("category", []), values.get("categories", []))
     return {
         "category": values.get("category", [""])[0].strip(),
         "tag": values.get("tag", [""])[0].strip(),
+        "categories": categories,
+        "tags": tags,
         "person": values.get("person", [""])[0].strip(),
         "date_from": values.get("date_from", [""])[0].strip(),
         "date_to": values.get("date_to", [""])[0].strip(),
     }
+
+
+def _merge_filter_values(*groups: list[str]) -> list[str]:
+    merged = []
+    seen = set()
+    for group in groups:
+        for raw in group or []:
+            value = (raw or "").strip()
+            if not value:
+                continue
+            normalized = value.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            merged.append(value)
+    return merged
 
 
 def build_prefill_context(context_title: str, context_source: str) -> str:
